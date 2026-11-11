@@ -24,6 +24,7 @@
   const inherit = $derived(scope == null ? "Mocktail's setting" : "Same as all accounts");
   const account = $derived(app.accounts.find((a) => a.id === scope) ?? null);
   const flagRows = $derived(Object.entries(draft.fflags).sort(([a], [b]) => a.localeCompare(b)));
+  const memoryTooLow = $derived(draft.memoryLimitMb != null && draft.memoryLimitMb !== 0 && draft.memoryLimitMb < 2048);
   const fpsChoice = $derived(draft.fps == null ? "" : draft.fps === "display" || draft.fps === "unlimited" ? draft.fps : "custom");
 
   function load(s: number | null) {
@@ -71,6 +72,8 @@
     const empty = JSON.stringify(draft) === JSON.stringify(NO_OPTIONS);
     error = await saveLaunchOptions(scope, scope != null && empty ? null : $state.snapshot(draft));
     saving = false;
+    // A rejected save must be impossible to miss: nothing was stored.
+    if (error) toast(`Not saved. ${error}`, "danger");
     if (!error) {
       dirty = false;
       toast("Saved. It applies the next time a game starts.", "ok");
@@ -186,15 +189,21 @@
       </select>
     </label>
     <label>
-      <span>Memory cap (MB, 0 = off)</span>
+      <span>Memory safety limit (MB, 0 = off)</span>
       <input
         type="number"
         min="0"
         step="512"
         placeholder={inherit}
         value={draft.memoryLimitMb ?? ""}
+        aria-invalid={memoryTooLow}
         oninput={(e) => set("memoryLimitMb", e.currentTarget.value === "" ? null : Number(e.currentTarget.value))}
       />
+      <small class:bad={memoryTooLow}>
+        {memoryTooLow
+          ? "Too low: Roblox needs about 1.5 GB. Use 0, or 2048 and up."
+          : "Doesn't make Roblox use less. Mocktail closes the game if it goes over."}
+      </small>
     </label>
     <label>
       <span>Roblox client updates</span>
@@ -268,7 +277,7 @@
     <span class="grow"></span>
     {#if dirty}<span class="faint">Unsaved changes</span>{/if}
     <Button disabled={!dirty} onclick={() => load(scope)}>Discard</Button>
-    <Button variant="primary" disabled={!dirty} busy={saving} onclick={save}>Save</Button>
+    <Button variant="primary" disabled={!dirty || memoryTooLow} busy={saving} onclick={save}>Save</Button>
   </div>
   {#if error}<p class="err" role="alert">{error}</p>{/if}
 </div>
@@ -334,6 +343,13 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-1);
+  }
+  label small {
+    font-size: 0.6875rem;
+    color: var(--text-2);
+  }
+  label small.bad {
+    color: var(--danger);
   }
   select,
   input,

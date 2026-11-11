@@ -9,6 +9,9 @@ pub const VSYNC: [&str; 3] = ["auto", "on", "off"];
 pub const PRESENT_MODES: [&str; 4] = ["auto", "fifo", "mailbox", "immediate"];
 pub const GAMEMODE: [&str; 3] = ["auto", "on", "off"];
 const MAX_FLAGS: usize = 200;
+/// Roblox itself needs about 1.5 GB. Mocktail closes the game when the cap is exceeded,
+/// so anything lower would end every session as it loads.
+pub const MIN_MEMORY_CAP_MB: u32 = 2048;
 /// Flags Vodka sets itself through the FPS option; editing them by hand would fight it.
 const MANAGED_FLAGS: [&str; 2] = ["DFIntTaskSchedulerTargetFps", "FFlagGameBasicSettingsFramerateCap5"];
 
@@ -95,8 +98,10 @@ pub fn validate(options: &LaunchOptions) -> Result<LaunchOptions, String> {
     one_of("Present mode", &options.present_mode, &PRESENT_MODES)?;
     one_of("GameMode", &options.gamemode, &GAMEMODE)?;
     if let Some(mb) = options.memory_limit_mb {
-        if mb != 0 && !(1024..=262_144).contains(&mb) {
-            return Err("Memory cap must be 0 (off) or between 1024 and 262144 MB.".into());
+        if mb != 0 && !(MIN_MEMORY_CAP_MB..=262_144).contains(&mb) {
+            return Err(format!(
+                "Memory cap must be 0 (off) or at least {MIN_MEMORY_CAP_MB} MB. Roblox needs about 1.5 GB, and Mocktail closes the game when the cap is exceeded."
+            ));
         }
     }
     if options.fflags.len() > MAX_FLAGS {
@@ -211,7 +216,8 @@ mod tests {
         assert!(validate(&LaunchOptions { backend: Some("directx".into()), ..base.clone() }).is_err());
         assert!(validate(&LaunchOptions { vsync: Some("maybe".into()), ..base.clone() }).is_err());
         assert!(validate(&LaunchOptions { present_mode: Some("mailbox".into()), ..base.clone() }).is_ok());
-        assert!(validate(&LaunchOptions { memory_limit_mb: Some(512), ..base.clone() }).is_err());
+        assert!(validate(&LaunchOptions { memory_limit_mb: Some(600), ..base.clone() }).unwrap_err().contains("closes the game"));
+        assert!(validate(&LaunchOptions { memory_limit_mb: Some(4096), ..base.clone() }).is_ok());
         assert!(validate(&LaunchOptions { memory_limit_mb: Some(0), ..base.clone() }).is_ok());
         assert!(validate(&LaunchOptions { fflags: flags(&[("FFlagX", "maybe")]), ..base.clone() }).is_err());
         // Two spellings of one flag collapse into a duplicate.
