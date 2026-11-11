@@ -2,6 +2,7 @@
   import Avatar from "$lib/components/Avatar.svelte";
   import Button from "$lib/components/Button.svelte";
   import Logo from "$lib/components/Logo.svelte";
+  import TweaksEditor from "$lib/components/TweaksEditor.svelte";
   import { app, removeAccount, setFlags, signIn } from "$lib/state.svelte";
 </script>
 
@@ -26,6 +27,11 @@
         <Button variant="primary" busy={app.signingIn} onclick={signIn}>Sign in with Roblox</Button>
       </div>
     {/if}
+  </section>
+
+  <section class="glass">
+    <h2>Performance</h2>
+    <TweaksEditor />
   </section>
 
   <section class="glass">
@@ -73,7 +79,8 @@
   .settings {
     display: grid;
     gap: var(--s-5);
-    max-width: 760px;
+    max-width: 860px;
+    padding-right: var(--s-4);
   }
   section {
     display: grid;

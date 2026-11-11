@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { Account, AppError, ExitEvent, Game, Instance, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -41,6 +41,9 @@ export const api = {
   stopInstance: (id: number, restart: boolean) => call<void>("stop_instance", { id, restart }),
   getSettings: () => call<Settings>("get_settings"),
   setFlags: (flags: { onboarded?: boolean; multiInstanceAccepted?: boolean }) => call<Settings>("set_flags", { flags }),
+  checkFflag: (name: string, value: string) => call<[string, string]>("check_fflag", { name, value }),
+  saveLaunchOptions: (accountId: number | null, options: LaunchOptions | null) => call<Settings>("save_launch_options", { accountId, options }),
+  rollbackClient: (accountId: number) => call<Settings>("rollback_client", { accountId }),
   onInstancesChanged: (h: () => void) => on<null>("instances://changed", h),
   onInstanceExit: (h: (event: ExitEvent) => void) => on<ExitEvent>("instances://exit", h),
   onInstanceError: (h: (error: AppError) => void) => on<AppError>("instances://error", h),

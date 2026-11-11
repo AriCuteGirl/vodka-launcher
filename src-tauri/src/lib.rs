@@ -4,6 +4,7 @@ mod instances;
 mod mocktail;
 mod roblox_api;
 mod settings;
+mod tweaks;
 
 use error::{AppError, Result};
 use instances::{InstanceView, SharedManager};
@@ -12,6 +13,7 @@ use roblox_api::{Game, Presence, User};
 use serde::{Deserialize, Serialize};
 use settings::{SavedAccount, Settings};
 use std::path::PathBuf;
+use tweaks::LaunchOptions;
 use tauri::{AppHandle, Manager, State};
 
 pub struct AppState {
@@ -29,6 +31,8 @@ struct AccountView {
     active: bool,
     presence: Option<Presence>,
     in_vodka_game: bool,
+    /// Roblox client version of this account's profile; `None` before its first game.
+    client_version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +48,11 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
 
 fn config_dir(app: &AppHandle) -> Result<PathBuf> {
     app.path().app_config_dir().map_err(|e| AppError::Other(e.to_string()))
+}
+
+fn flatpak_data() -> Result<PathBuf> {
+    let home = std::env::var_os("HOME").ok_or_else(|| AppError::Other("HOME is not set.".into()))?;
+    Ok(instances::profiles::flatpak_data(&PathBuf::from(home)))
 }
 
 fn active_account(app: &AppHandle) -> Result<Option<SavedAccount>> {
@@ -108,6 +117,7 @@ async fn list_accounts(app: AppHandle, state: State<'_, AppState>) -> Result<Vec
         Err(_) => Default::default(),
     };
     let running = instances::running_account_ids(&state.instances);
+    let data = flatpak_data()?;
     Ok(saved
         .accounts
         .iter()
@@ -119,6 +129,7 @@ async fn list_accounts(app: AppHandle, state: State<'_, AppState>) -> Result<Vec
             active: saved.active_account == Some(a.id),
             presence: presence.get(&a.id).cloned(),
             in_vodka_game: running.contains(&a.id),
+            client_version: instances::profiles::client_version(&instances::profiles::profile_paths(&data, a.id)),
         })
         .collect())
 }
@@ -146,8 +157,7 @@ async fn remove_account(app: AppHandle, state: State<'_, AppState>, account_id: 
     }
     blocking(move || {
         accounts::clear_session(account_id)?;
-        let home = std::env::var_os("HOME").ok_or_else(|| AppError::Other("HOME is not set.".into()))?;
-        let data = instances::profiles::flatpak_data(&PathBuf::from(home));
+        let data = flatpak_data()?;
         instances::profiles::remove_tree(&instances::profiles::profile_paths(&data, account_id).root)
             .map_err(|e| AppError::Other(format!("Signed out, but the account's game profile couldn't be deleted: {e}")))
     })
@@ -177,8 +187,12 @@ async fn launch_game(app: AppHandle, state: State<'_, AppState>, game: Game) -> 
     if !status.installed {
         return Err(AppError::MocktailMissing);
     }
-    let account = active_account(&app)?.ok_or(AppError::NotSignedIn)?;
-    instances::launch(app, state.instances.clone(), account, game).await
+    let saved = settings::load(&config_dir(&app)?);
+    let account = saved.active().cloned().ok_or(AppError::NotSignedIn)?;
+    let options = tweaks::effective(&saved.defaults, saved.account_options.get(&account.id));
+    // Saved options were validated when they were saved; check again in case the file was edited by hand.
+    let options = tweaks::validate(&options).map_err(AppError::Launch)?;
+    instances::launch(app, state.instances.clone(), account, game, tweaks::to_env(&options)).await
 }
 
 #[tauri::command]
@@ -191,6 +205,57 @@ async fn list_instances(state: State<'_, AppState>) -> Result<Vec<InstanceView>>
 async fn stop_instance(state: State<'_, AppState>, id: u32, restart: bool) -> Result<()> {
     let manager = state.instances.clone();
     blocking(move || instances::stop(&manager, id, restart)).await
+}
+
+/// Checks one FFlag and returns it as it will be saved.
+#[tauri::command]
+fn check_fflag(name: String, value: String) -> Result<(String, String)> {
+    tweaks::normalize_flag(&name, &value).map_err(AppError::Other)
+}
+
+/// Saves launch options for every account (`account_id` empty) or for one account.
+/// For an account, `options` empty removes its overrides.
+#[tauri::command]
+fn save_launch_options(app: AppHandle, account_id: Option<u64>, options: Option<LaunchOptions>) -> Result<Settings> {
+    let options = options.map(|o| tweaks::validate(&o)).transpose().map_err(AppError::Other)?;
+    settings::update(&config_dir(&app)?, |s| match (account_id, options) {
+        (None, options) => s.defaults = options.unwrap_or_default(),
+        (Some(id), Some(options)) => {
+            s.account_options.insert(id, options);
+        }
+        (Some(id), None) => {
+            s.account_options.remove(&id);
+        }
+    })
+}
+
+/// Puts an account's profile back on its previous Roblox client, using Mocktail's own updater,
+/// and holds updates for that account so the next launch doesn't undo it.
+#[tauri::command]
+async fn rollback_client(app: AppHandle, state: State<'_, AppState>, account_id: u64) -> Result<Settings> {
+    if instances::running_account_ids(&state.instances).contains(&account_id) {
+        return Err(AppError::Other("That account is in a game. Close the game first.".into()));
+    }
+    let profile = instances::profiles::profile_paths(&flatpak_data()?, account_id);
+    if instances::profiles::client_version(&profile).is_none() {
+        return Err(AppError::Other("This account hasn't played yet, so there is nothing to roll back.".into()));
+    }
+    let output = tokio::process::Command::new("flatpak")
+        .args(["run", "--command=/app/lib/mocktail/mocktail_updater", mocktail::detect::APP_ID, "rollback"])
+        .env("MOCKTAIL_DATA_ROOT", &profile.data)
+        .env("MOCKTAIL_CACHE_ROOT", &profile.cache)
+        .env("MOCKTAIL_STATE_ROOT", &profile.state)
+        .output()
+        .await
+        .map_err(|e| AppError::Other(format!("Could not run Mocktail's updater: {e}")))?;
+    if !output.status.success() {
+        let reason = String::from_utf8_lossy(&output.stderr);
+        let reason = reason.lines().rev().find(|l| !l.trim().is_empty() && !l.starts_with("F:")).unwrap_or("no reason given");
+        return Err(AppError::Other(format!("Mocktail couldn't roll back: {}", reason.trim())));
+    }
+    settings::update(&config_dir(&app)?, |s| {
+        s.account_options.entry(account_id).or_default().hold_updates = Some(true);
+    })
 }
 
 #[tauri::command]
@@ -227,7 +292,10 @@ pub fn run() {
             list_instances,
             stop_instance,
             get_settings,
-            set_flags
+            set_flags,
+            check_fflag,
+            save_launch_options,
+            rollback_client
         ])
         .run(tauri::generate_context!())
         .expect("error while running Vodka Launcher");

@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import type { Account, AppError, ExitEvent, Game, Instance, MocktailStatus, Settings, User } from "./types";
+import { NO_OPTIONS, type Account, type AppError, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -29,12 +29,19 @@ const signedOut = ["onboarding", "signedout"].includes(scenario());
 let accounts: Account[] = signedOut
   ? []
   : [
-      { id: 1, name: "frostbyte", displayName: "Frostbyte", avatarUrl: null, active: true, presence: { kind: "online", location: "Website" }, inVodkaGame: false },
-      { id: 2, name: "snowmelt_alt", displayName: "Snowmelt", avatarUrl: null, active: false, presence: { kind: "offline", location: null }, inVodkaGame: false },
+      { id: 1, name: "frostbyte", displayName: "Frostbyte", avatarUrl: null, active: true, presence: { kind: "online", location: "Website" }, inVodkaGame: false, clientVersion: "2.742.1059" },
+      { id: 2, name: "snowmelt_alt", displayName: "Snowmelt", avatarUrl: null, active: false, presence: { kind: "offline", location: null }, inVodkaGame: false, clientVersion: null },
     ];
-let settings: Settings = { onboarded: true, activeAccount: signedOut ? null : 1, multiInstanceAccepted: false };
+let settings: Settings = { onboarded: true, activeAccount: signedOut ? null : 1, multiInstanceAccepted: false, defaults: { ...NO_OPTIONS }, accountOptions: {} };
 let instances: Instance[] = [];
 let nextId = 1;
+
+/** What the demo "measures" for an account, from its saved FPS option. */
+function demoFps(accountId: number): number {
+  const fps = settings.accountOptions[String(accountId)]?.fps ?? settings.defaults.fps;
+  const target = fps === "unlimited" ? 240 : fps === "display" || fps == null ? 60 : Number(fps);
+  return target - Math.random() * 1.5;
+}
 
 const active = () => accounts.find((a) => a.active) ?? null;
 const asUser = (a: Account): User => ({ id: a.id, name: a.name, displayName: a.displayName, avatarUrl: a.avatarUrl });
@@ -104,6 +111,7 @@ function launch(game: Game, account: Account): number {
     startedAtMs: Date.now(),
     cpuPercent: 0,
     memoryBytes: 180 * 1024 * 1024,
+    fps: null,
     log: [],
   };
   instances.push(inst);
@@ -159,7 +167,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "begin_login":
       setTimeout(() => {
         const id = accounts.length ? Math.max(...accounts.map((a) => a.id)) + 1 : 1;
-        const added: Account = { id, name: id === 1 ? "frostbyte" : `icicle_${id}`, displayName: id === 1 ? "Frostbyte" : `Icicle ${id}`, avatarUrl: null, active: true, presence: { kind: "online", location: "Website" }, inVodkaGame: false };
+        const added: Account = { id, name: id === 1 ? "frostbyte" : `icicle_${id}`, displayName: id === 1 ? "Frostbyte" : `Icicle ${id}`, avatarUrl: null, active: true, presence: { kind: "online", location: "Website" }, inVodkaGame: false, clientVersion: null };
         accounts = [...accounts.map((a) => ({ ...a, active: false })), added];
         settings.activeAccount = id;
         emit("auth://signed-in", asUser(added));
@@ -176,7 +184,36 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
         ...i,
         cpuPercent: i.phase === "playing" ? 80 + Math.random() * 60 : 15 + Math.random() * 20,
         memoryBytes: (i.phase === "playing" ? 1700 + Math.random() * 60 : 400) * 1024 * 1024,
+        fps: i.phase === "playing" ? demoFps(i.accountId) : null,
       }));
+    case "check_fflag": {
+      const name = String(args.name).trim();
+      const value = String(args.value).trim();
+      const kind = /^(?:DF|SF|F)(Flag|Int|String|Log)[A-Za-z0-9_]+$/.exec(name)?.[1];
+      if (!kind) throw { kind: "other", message: "Flag names start with FFlag, FInt, FString or FLog (optionally DF… or SF…), followed by letters and digits." };
+      if (name === "DFIntTaskSchedulerTargetFps") throw { kind: "other", message: "Vodka sets this flag from the FPS option. Change FPS there instead." };
+      if (kind === "Flag") {
+        if (!/^(true|false)$/i.test(value)) throw { kind: "other", message: `${name} is an on/off flag: use True or False.` };
+        return [name, value.toLowerCase() === "true" ? "True" : "False"];
+      }
+      if (kind !== "String" && !/^-?\d+$/.test(value)) throw { kind: "other", message: `${name} needs a whole number.` };
+      return [name, value];
+    }
+    case "save_launch_options": {
+      const options = args.options as LaunchOptions | null;
+      if (args.accountId == null) settings.defaults = options ?? { ...NO_OPTIONS };
+      else if (options) settings.accountOptions[String(args.accountId)] = options;
+      else delete settings.accountOptions[String(args.accountId)];
+      return { ...settings };
+    }
+    case "rollback_client": {
+      const a = accounts.find((x) => x.id === args.accountId);
+      if (!a?.clientVersion) throw { kind: "other", message: "This account hasn't played yet, so there is nothing to roll back." };
+      a.clientVersion = "2.736.1408";
+      const key = String(args.accountId);
+      settings.accountOptions[key] = { ...(settings.accountOptions[key] ?? NO_OPTIONS), holdUpdates: true };
+      return { ...settings };
+    }
     case "stop_instance": {
       const inst = instances.find((i) => i.id === args.id);
       if (!inst) throw { kind: "other", message: "That game has already closed." };

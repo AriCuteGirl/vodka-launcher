@@ -114,6 +114,12 @@ pub fn prepare(main_data: &Path, profile: &ProfilePaths) -> io::Result<()> {
     std::fs::copy(main_data.join("current.json"), profile.data.join("current.json")).map(|_| ())
 }
 
+/// The Roblox client version this profile currently runs.
+pub fn client_version(profile: &ProfilePaths) -> Option<String> {
+    let text = std::fs::read_to_string(profile.data.join("current.json")).ok()?;
+    crate::mocktail::detect::parse_roblox_version(&text)
+}
+
 /// Mocktail writes the session it was given into the profile. Vodka removes that copy
 /// when the game closes, so the keyring stays the only place it is kept.
 pub fn clear_session_copy(profile: &ProfilePaths) {
@@ -167,6 +173,7 @@ mod tests {
         assert_eq!(original.ino(), linked.ino());
         assert_eq!(std::fs::metadata(profile.data.join("payloads/1-abc/assets")).unwrap().mode() & 0o777, 0o555);
         assert!(profile.data.join("approvals/a.json").is_file());
+        assert_eq!(client_version(&profile).as_deref(), Some("1"));
         assert!(profile.cache.is_dir() && profile.state.is_dir());
         // The session folder is never copied from the main profile.
         assert!(!profile.data.join("auth").exists());

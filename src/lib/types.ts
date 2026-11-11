@@ -42,6 +42,7 @@ export interface Account {
   presence: Presence | null;
   /** In a game that Vodka started. */
   inVodkaGame: boolean;
+  clientVersion: string | null;
 }
 
 export interface Instance {
@@ -54,6 +55,7 @@ export interface Instance {
   startedAtMs: number;
   cpuPercent: number;
   memoryBytes: number;
+  fps: number | null;
   log: string[];
 }
 
@@ -66,10 +68,37 @@ export interface ExitEvent {
   restarting: boolean;
 }
 
+/** `null` means "don't override": the account falls back to the defaults, the defaults to Mocktail's own config. */
+export interface LaunchOptions {
+  fps: string | null;
+  backend: string | null;
+  vsync: string | null;
+  presentMode: string | null;
+  multithreadedRendering: boolean | null;
+  gamemode: string | null;
+  memoryLimitMb: number | null;
+  holdUpdates: boolean | null;
+  fflags: Record<string, string>;
+}
+
+export const NO_OPTIONS: LaunchOptions = {
+  fps: null,
+  backend: null,
+  vsync: null,
+  presentMode: null,
+  multithreadedRendering: null,
+  gamemode: null,
+  memoryLimitMb: null,
+  holdUpdates: null,
+  fflags: {},
+};
+
 export interface Settings {
   onboarded: boolean;
   activeAccount: number | null;
   multiInstanceAccepted: boolean;
+  defaults: LaunchOptions;
+  accountOptions: Record<string, LaunchOptions>;
 }
 
 export interface ExitReport {

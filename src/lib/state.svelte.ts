@@ -1,6 +1,6 @@
 // App-wide reactive state. Components read `app.*` and call the functions below.
 import { api } from "./api";
-import { toAppError, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, toAppError, type LaunchOptions, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type Settings, type User } from "./types";
 
 export interface Toast {
   id: number;
@@ -14,7 +14,7 @@ export const MAX_INSTANCES = 2;
 export const app = $state({
   booted: false,
   bootError: null as AppError | null,
-  settings: { onboarded: false, activeAccount: null, multiInstanceAccepted: false } as Settings,
+  settings: { onboarded: false, activeAccount: null, multiInstanceAccepted: false, defaults: { ...NO_OPTIONS }, accountOptions: {} } as Settings,
   /** The active account, confirmed by Roblox. */
   account: null as User | null,
   accounts: [] as Account[],
@@ -193,6 +193,27 @@ export async function acceptMultiInstance() {
   app.pendingSecondGame = null;
   await setFlags({ multiInstanceAccepted: true });
   if (game && app.settings.multiInstanceAccepted) await launch(game);
+}
+
+/** Saves launch options for all accounts (`accountId` null) or one. Returns the error text if they were rejected. */
+export async function saveLaunchOptions(accountId: number | null, options: LaunchOptions | null): Promise<string | null> {
+  try {
+    app.settings = await api.saveLaunchOptions(accountId, options);
+    return null;
+  } catch (e) {
+    return toAppError(e).message;
+  }
+}
+
+export async function rollbackClient(accountId: number) {
+  try {
+    app.settings = await api.rollbackClient(accountId);
+    await refreshAccounts();
+    const version = app.accounts.find((a) => a.id === accountId)?.clientVersion;
+    toast(`Rolled back to Roblox ${version ?? "the previous client"}. Updates are now held for this account.`, "ok");
+  } catch (e) {
+    fail(e);
+  }
 }
 
 export async function stopInstance(id: number, restart = false) {

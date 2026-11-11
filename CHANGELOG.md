@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+Phase 3: performance and tweaks.
+
+- Launch options for all accounts or one: frame rate, graphics backend, VSync, present mode, multithreaded rendering, GameMode, memory cap.
+- FFlag editor with name and value checks, presets, JSON import and export, and reset.
+- Live FPS for each running game, measured from Mocktail's frame counter.
+- Per-account Roblox client version, "hold updates", and one-step rollback through Mocktail's updater.
+
 Phase 2: accounts and instances.
 
 - Several Roblox accounts: add, switch and remove them on the Players page or from the title strip. Each session has its own keyring entry.

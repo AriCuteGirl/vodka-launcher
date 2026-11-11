@@ -4,7 +4,7 @@ A Roblox launcher for Linux. Vodka is the front end; [Mocktail](https://github.c
 
 ![First-run setup](docs/screenshots/onboarding.png)
 
-**Status:** phase 2 of 5. Home, sign-in, several accounts, launching and up to two games at once exist. Games, Marketplace and Friends are placeholders.
+**Status:** phase 3 of 5. Home, sign-in, several accounts, up to two games at once, launch options and an FFlag editor exist. Games, Marketplace and Friends are placeholders.
 
 ## What it does today
 
@@ -13,7 +13,8 @@ A Roblox launcher for Linux. Vodka is the front end; [Mocktail](https://github.c
 - Shows "Continue playing" and "Favorites" with a Play button that starts Mocktail in that game.
 - Shows Mocktail's output while it starts, and the reason if it crashes.
 - Keeps several accounts, each with its own isolated Mocktail profile, and switches between them.
-- Runs up to two games at once, one per account, with CPU and memory per game.
+- Runs up to two games at once, one per account, with FPS, CPU and memory per game.
+- Sets frame rate, graphics and FFlags for all accounts or per account, and can hold or roll back the Roblox client.
 
 Running two Roblox clients at once is not supported by Mocktail's developers and is against Roblox's Terms of Use. Vodka warns
 before the first time; the risk to your accounts is yours.
@@ -52,6 +53,7 @@ The browser-only UI accepts `?demo=` to show a state: `loading`, `empty`, `error
 | `src-tauri/src/accounts` | Login window and keyring storage, one entry per account |
 | `src-tauri/src/instances` | Running games: per-account profiles, slots, CPU/RAM, stop and restart |
 | `src-tauri/src/roblox_api` | Typed Roblox web API client: host allowlist, cache, backoff |
+| `src-tauri/src/tweaks.rs` | Launch options and FFlag validation, mapped to Mocktail's environment variables |
 | `src-tauri/src/settings.rs` | Non-secret preferences |
 | `src/lib` | UI: design tokens, components, state |
 | `src/routes` | Pages |

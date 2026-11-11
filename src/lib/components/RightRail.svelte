@@ -34,7 +34,7 @@
         <span class="time"><Icon name="clock" size={14} />{elapsed((now - inst.startedAtMs) / 1000)}</span>
       </header>
       <p class="game">{inst.game.name}</p>
-      <p class="who faint">{inst.accountName} · {Math.round(inst.cpuPercent)}% CPU · {memory(inst.memoryBytes)}</p>
+      <p class="who faint">{inst.accountName} · {inst.fps != null ? `${Math.round(inst.fps)} FPS · ` : ""}{Math.round(inst.cpuPercent)}% CPU · {memory(inst.memoryBytes)}</p>
       {#if inst.phase === "starting"}
         <pre class="selectable" aria-label="Mocktail output">{inst.log.slice(-12).join("\n") || "Waiting for Mocktail…"}</pre>
       {/if}

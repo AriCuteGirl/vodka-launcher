@@ -17,6 +17,21 @@ pub fn is_running_marker(line: &str) -> bool {
     line.contains("[perf] present_sample")
 }
 
+/// Reads Mocktail's periodic frame counter line: (frames presented so far, monotonic nanoseconds).
+pub fn parse_present_sample(line: &str) -> Option<(u64, u64)> {
+    let rest = line.split("present_sample frame=").nth(1)?;
+    let (frame, rest) = rest.split_once(' ')?;
+    let ns = rest.strip_prefix("monotonic_ns=")?.split_whitespace().next()?;
+    Some((frame.parse().ok()?, ns.parse().ok()?))
+}
+
+/// Frames per second between two samples.
+pub fn fps_between(before: (u64, u64), now: (u64, u64)) -> Option<f64> {
+    let frames = now.0.checked_sub(before.0)?;
+    let ns = now.1.checked_sub(before.1).filter(|ns| *ns > 0)?;
+    Some(frames as f64 / (ns as f64 / 1e9))
+}
+
 pub fn launch_uri(place_id: u64) -> String {
     format!("roblox://experiences/start?placeId={place_id}")
 }
@@ -70,6 +85,19 @@ mod tests {
     fn spots_the_first_rendered_frame() {
         assert!(is_running_marker("  [perf] present_sample frame=120"));
         assert!(!is_running_marker("  [window] Window ready; waiting for Roblox frames"));
+    }
+
+    #[test]
+    fn measures_fps_from_two_frame_samples() {
+        // Real lines from a Mocktail log: 240 frames in 4.0002 s.
+        let a = parse_present_sample("  [perf] present_sample frame=19680 monotonic_ns=337838012812").unwrap();
+        let b = parse_present_sample("  [perf] present_sample frame=19920 monotonic_ns=341838189558").unwrap();
+        assert_eq!(a, (19680, 337838012812));
+        let fps = fps_between(a, b).unwrap();
+        assert!((fps - 60.0).abs() < 0.1, "{fps}");
+        assert_eq!(fps_between(b, a), None);
+        assert_eq!(fps_between(a, a), None);
+        assert_eq!(parse_present_sample("  [perf] something else"), None);
     }
 
     #[test]

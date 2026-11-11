@@ -10,7 +10,7 @@ pub mod profiles;
 use crate::accounts;
 use crate::error::{AppError, Result};
 use crate::mocktail::detect::APP_ID;
-use crate::mocktail::launch::{ExitReport, classify_exit, is_running_marker, launch_uri, redact};
+use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, launch_uri, parse_present_sample, redact};
 use crate::roblox_api::Game;
 use crate::settings::SavedAccount;
 use profiles::ProfilePaths;
@@ -41,6 +41,9 @@ struct Instance {
     profile: ProfilePaths,
     sample: Option<(Instant, u64)>,
     cpu_percent: f64,
+    frame_sample: Option<(u64, u64)>,
+    fps: Option<f64>,
+    env: Vec<(&'static str, String)>,
 }
 
 #[derive(Default)]
@@ -64,6 +67,8 @@ pub struct InstanceView {
     pub started_at_ms: u64,
     pub cpu_percent: f64,
     pub memory_bytes: u64,
+    /// Measured from Mocktail's frame counter; `None` until two samples have arrived.
+    pub fps: Option<f64>,
     pub log: Vec<String>,
 }
 
@@ -112,6 +117,12 @@ fn pump<R: AsyncRead + Unpin + Send + 'static>(reader: R, app: AppHandle, manage
                     inst.log.pop_front();
                 }
                 inst.log.push_back(line.clone());
+                if let Some(sample) = parse_present_sample(&line) {
+                    if let Some(before) = inst.frame_sample {
+                        inst.fps = fps_between(before, sample).or(inst.fps);
+                    }
+                    inst.frame_sample = Some(sample);
+                }
                 if !inst.playing && is_running_marker(&line) {
                     inst.playing = true;
                     inst.started_at_ms = now_ms();
@@ -126,7 +137,13 @@ fn pump<R: AsyncRead + Unpin + Send + 'static>(reader: R, app: AppHandle, manage
 }
 
 /// Starts `game` as `account` in a free slot. Returns the new instance id.
-pub async fn launch(app: AppHandle, manager: SharedManager, account: SavedAccount, game: Game) -> Result<u32> {
+pub async fn launch(
+    app: AppHandle,
+    manager: SharedManager,
+    account: SavedAccount,
+    game: Game,
+    env: Vec<(&'static str, String)>,
+) -> Result<u32> {
     let used: Vec<(usize, u64)> = manager.lock().unwrap().instances.iter().map(|i| (i.slot, i.account.id)).collect();
     pick_slot(&used, account.id, &account.display_name)?;
 
@@ -153,6 +170,7 @@ pub async fn launch(app: AppHandle, manager: SharedManager, account: SavedAccoun
         cmd.arg(format!("--command={command}"));
     }
     cmd.args([APP_ID, &launch_uri(game.place_id)])
+        .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
         .env("MOCKTAIL_DATA_ROOT", &profile.data)
         .env("MOCKTAIL_CACHE_ROOT", &profile.cache)
         .env("MOCKTAIL_STATE_ROOT", &profile.state)
@@ -180,6 +198,9 @@ pub async fn launch(app: AppHandle, manager: SharedManager, account: SavedAccoun
         profile,
         sample: None,
         cpu_percent: 0.0,
+        frame_sample: None,
+        fps: None,
+        env,
     });
     drop(m);
 
@@ -220,7 +241,7 @@ pub async fn launch(app: AppHandle, manager: SharedManager, account: SavedAccoun
         );
         let _ = app.emit("instances://changed", ());
         if inst.restart {
-            if let Err(e) = launch_boxed(app.clone(), manager, inst.account, inst.game).await {
+            if let Err(e) = launch_boxed(app.clone(), manager, inst.account, inst.game, inst.env).await {
                 let _ = app.emit("instances://error", e);
             }
         }
@@ -231,8 +252,14 @@ pub async fn launch(app: AppHandle, manager: SharedManager, account: SavedAccoun
 type LaunchFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32>> + Send>>;
 
 /// `launch` restarts games by calling itself; boxing gives that recursion a nameable type.
-fn launch_boxed(app: AppHandle, manager: SharedManager, account: SavedAccount, game: Game) -> LaunchFuture {
-    Box::pin(launch(app, manager, account, game))
+fn launch_boxed(
+    app: AppHandle,
+    manager: SharedManager,
+    account: SavedAccount,
+    game: Game,
+    env: Vec<(&'static str, String)>,
+) -> LaunchFuture {
+    Box::pin(launch(app, manager, account, game, env))
 }
 
 /// Asks an instance's whole process tree to stop. With `restart`, it is started again once it has closed.
@@ -294,6 +321,7 @@ pub fn list(manager: &SharedManager) -> Vec<InstanceView> {
                 started_at_ms: inst.started_at_ms,
                 cpu_percent: inst.cpu_percent,
                 memory_bytes: tree.iter().map(|p| p.memory_bytes).sum(),
+                fps: inst.fps,
                 log: inst.log.iter().rev().take(40).rev().cloned().collect(),
             }
         })

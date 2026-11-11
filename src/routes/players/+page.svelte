@@ -61,6 +61,7 @@
             <b>{a.displayName}</b>
             <span class="faint">@{a.name}</span>
             <span class="presence" class:live={!!dot(a)}>{presenceText(a)}</span>
+            <span class="faint">{a.clientVersion ? `Roblox ${a.clientVersion}` : "Hasn't played here yet"}</span>
           </div>
           {#if a.active}<span class="badge">Active</span>{/if}
           <div class="actions">
@@ -91,6 +92,7 @@
               <span class="faint">{inst.accountName} · {inst.phase === "playing" ? "Playing" : "Starting"} · {elapsed((now - inst.startedAtMs) / 1000)}</span>
             </div>
             <dl>
+              <div><dt>FPS</dt><dd>{inst.fps != null ? Math.round(inst.fps) : "…"}</dd></div>
               <div><dt>CPU</dt><dd>{Math.round(inst.cpuPercent)}%</dd></div>
               <div><dt>Memory</dt><dd>{memory(inst.memoryBytes)}</dd></div>
             </dl>
@@ -261,6 +263,6 @@
   dd {
     margin: 0;
     font-weight: 600;
-    min-width: 6ch;
+    min-width: 5ch;
   }
 </style>

@@ -2,6 +2,8 @@
 //! Account names and ids live here; their sessions live in the keyring.
 
 use crate::error::{AppError, Result};
+use crate::tweaks::LaunchOptions;
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
@@ -22,6 +24,10 @@ pub struct Settings {
     pub active_account: Option<u64>,
     /// The user has read and accepted the multi-instance warning.
     pub multi_instance_accepted: bool,
+    /// Launch options for every account.
+    pub defaults: LaunchOptions,
+    /// Per-account launch options, keyed by account id. They override `defaults`.
+    pub account_options: BTreeMap<u64, LaunchOptions>,
 }
 
 impl Settings {
@@ -42,6 +48,7 @@ impl Settings {
     /// Removes an account; another one becomes active if there is one.
     pub fn remove(&mut self, id: u64) {
         self.accounts.retain(|a| a.id != id);
+        self.account_options.remove(&id);
         if self.active_account == Some(id) {
             self.active_account = self.accounts.first().map(|a| a.id);
         }
@@ -112,7 +119,9 @@ mod tests {
         s.upsert_active(SavedAccount { display_name: "Renamed".into(), ..acct(1) });
         assert_eq!(s.accounts.len(), 2);
         assert_eq!(s.active().unwrap().display_name, "Renamed");
+        s.account_options.insert(1, LaunchOptions { fps: Some("30".into()), ..Default::default() });
         s.remove(1);
+        assert!(s.account_options.is_empty());
         assert_eq!(s.active().unwrap().id, 2);
         s.remove(2);
         assert!(s.active().is_none());
