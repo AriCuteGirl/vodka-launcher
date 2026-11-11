@@ -9,7 +9,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
-  import { app, boot, play } from "$lib/state.svelte";
+  import { acceptMultiInstance, app, boot, play } from "$lib/state.svelte";
   import { onMount } from "svelte";
 
   let { children } = $props();
@@ -51,7 +51,7 @@
     {#if crash.log.length}
       <pre class="crashlog selectable">{crash.log.join("\n")}</pre>
     {/if}
-    <p class="faint hint">Full log: <code class="selectable">~/.var/app/space.bigrat.mocktail/.local/state/mocktail/logs/latest.log</code></p>
+    <p class="faint hint">Played as {crash.accountName}. Mocktail keeps the full log in that account's profile folder.</p>
     {#snippet actions()}
       <Button onclick={() => (app.crash = null)}>Close</Button>
       <Button
@@ -62,6 +62,26 @@
           void play(crash.game);
         }}>Try again</Button
       >
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if app.pendingSecondGame}
+  <Modal title="Run two games at once?" onclose={() => (app.pendingSecondGame = null)}>
+    <div class="warn">
+      <p>
+        You're about to start <b>{app.pendingSecondGame.name}</b> while another game is running. Before you do:
+      </p>
+      <ul>
+        <li>Roblox's Terms of Use don't allow working around its limit on running clients. Accounts that do can be restricted or banned.</li>
+        <li>Mocktail's developers chose not to support this. If it breaks, it's on Vodka, not on them.</li>
+        <li>Vodka runs one game per account, two at most.</li>
+      </ul>
+      <p class="faint">This is your call and your risk. Vodka asks once and remembers the answer.</p>
+    </div>
+    {#snippet actions()}
+      <Button onclick={() => (app.pendingSecondGame = null)}>Cancel</Button>
+      <Button variant="primary" onclick={acceptMultiInstance}>I understand, start it</Button>
     {/snippet}
   </Modal>
 {/if}
@@ -153,9 +173,20 @@
   .hint {
     font-size: var(--fs-xs);
   }
-  .hint code {
-    font-size: inherit;
-    word-break: break-all;
+  .warn {
+    display: grid;
+    gap: var(--s-3);
+    font-size: var(--fs-sm);
+    color: var(--text-1);
+  }
+  .warn b {
+    color: var(--text-0);
+  }
+  .warn ul {
+    display: grid;
+    gap: var(--s-2);
+    margin: 0;
+    padding-left: var(--s-5);
   }
   @media (max-width: 860px) {
     .body :global(.rail) {

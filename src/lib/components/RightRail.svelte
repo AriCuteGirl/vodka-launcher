@@ -1,20 +1,14 @@
 <script lang="ts">
-  import { elapsed } from "$lib/format";
-  import { app, refreshMocktail } from "$lib/state.svelte";
+  import { elapsed, memory } from "$lib/format";
+  import { app, refreshMocktail, stopInstance } from "$lib/state.svelte";
   import Icon from "./Icon.svelte";
 
   let now = $state(Date.now());
   let checking = $state(false);
-  let logEl = $state<HTMLElement>();
 
   $effect(() => {
     const t = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(t);
-  });
-
-  $effect(() => {
-    void app.log.length;
-    logEl?.scrollTo({ top: logEl.scrollHeight });
   });
 
   async function recheck() {
@@ -33,16 +27,23 @@
       <p>Who's online, what they're playing, and one-click join.</p>
     </div>
   </section>
-  {#if app.playing}
-    <section class="glass session">
+  {#each app.instances as inst (inst.id)}
+    <section class="glass session" class:mine={inst.accountId === app.account?.id}>
       <header>
-        <h2>{app.playing.phase === "playing" ? "Now playing" : "Now starting"}</h2>
-        <span class="time"><Icon name="clock" size={14} />{elapsed((now - app.playing.startedAt) / 1000)}</span>
+        <h2>{inst.phase === "playing" ? "Now playing" : "Now starting"}</h2>
+        <span class="time"><Icon name="clock" size={14} />{elapsed((now - inst.startedAtMs) / 1000)}</span>
       </header>
-      <p class="game">{app.playing.game.name}</p>
-      <pre bind:this={logEl} class="selectable" aria-label="Mocktail output">{app.log.slice(-40).join("\n") || "Waiting for Mocktail…"}</pre>
+      <p class="game">{inst.game.name}</p>
+      <p class="who faint">{inst.accountName} · {Math.round(inst.cpuPercent)}% CPU · {memory(inst.memoryBytes)}</p>
+      {#if inst.phase === "starting"}
+        <pre class="selectable" aria-label="Mocktail output">{inst.log.slice(-12).join("\n") || "Waiting for Mocktail…"}</pre>
+      {/if}
+      <div class="row">
+        <button class="mini" onclick={() => stopInstance(inst.id, true)}><Icon name="refresh" size={14} />Restart</button>
+        <button class="mini danger" onclick={() => stopInstance(inst.id)}><Icon name="close" size={14} />Close</button>
+      </div>
     </section>
-  {/if}
+  {/each}
 
   <section class="glass">
     <header>
@@ -151,9 +152,38 @@
       transform: rotate(360deg);
     }
   }
-  .session {
+  .session.mine {
     border-color: rgba(164, 222, 255, 0.35);
     box-shadow: var(--glow);
+  }
+  .who {
+    font-size: var(--fs-xs);
+    margin-bottom: var(--s-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .row {
+    display: flex;
+    gap: var(--s-2);
+  }
+  .mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--line);
+    background: var(--glass);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mini:hover {
+    background: var(--glass-hover);
+    border-color: var(--line-strong);
+  }
+  .mini.danger {
+    color: var(--danger);
   }
   .time {
     display: inline-flex;
@@ -165,11 +195,11 @@
   }
   .game {
     font-weight: 600;
-    margin-bottom: var(--s-3);
   }
   pre {
     margin: 0;
-    max-height: 150px;
+    max-height: 110px;
+    margin-bottom: var(--s-3);
     padding: var(--s-2) var(--s-3);
     overflow: auto;
     border-radius: var(--r-sm);

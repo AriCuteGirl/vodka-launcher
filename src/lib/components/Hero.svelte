@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { app, play } from "$lib/state.svelte";
+  import { app, phaseOf, play } from "$lib/state.svelte";
   import Button from "./Button.svelte";
 
   const last = $derived(app.continuePlaying.status === "ready" ? (app.continuePlaying.data[0] ?? null) : null);
-  const mine = $derived(last && app.playing?.game.universeId === last.universeId ? app.playing : null);
+  const phase = $derived(last ? phaseOf(last) : "idle");
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 </script>
@@ -36,11 +36,11 @@
     {#if last}
       <h1>Jump back into <span>{last.name}</span></h1>
       <div class="cta">
-        {#if mine?.phase === "playing"}
+        {#if phase === "playing"}
           <span class="live"><i></i>Playing now</span>
         {:else}
-          <Button variant="primary" size="lg" icon="play" disabled={!app.mocktail?.installed} busy={mine?.phase === "starting"} onclick={() => play(last)}>
-            {mine ? "Starting" : "Play now"}
+          <Button variant="primary" size="lg" icon="play" disabled={!app.mocktail?.installed} busy={phase === "starting"} onclick={() => play(last)}>
+            {phase === "starting" ? "Starting" : "Play now"}
           </Button>
         {/if}
         {#if !app.mocktail?.installed}<span class="faint">Install Mocktail to play</span>{/if}

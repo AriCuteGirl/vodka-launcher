@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compact, elapsed, matches } from "./format";
+import { compact, elapsed, matches, memory } from "./format";
 
 describe("compact", () => {
   it("keeps small numbers and shortens big ones", () => {
@@ -18,6 +18,13 @@ describe("elapsed", () => {
     expect(elapsed(245)).toBe("4m 05s");
     expect(elapsed(4320)).toBe("1h 12m");
     expect(elapsed(-3)).toBe("0m 00s");
+  });
+});
+
+describe("memory", () => {
+  it("switches to GB for large values", () => {
+    expect(memory(512 * 1024 * 1024)).toBe("512 MB");
+    expect(memory(1.5 * 1024 * 1024 * 1024)).toBe("1.5 GB");
   });
 });
 

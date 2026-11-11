@@ -3,7 +3,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Game, User};
+pub use parse::{Game, Presence, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -130,6 +130,27 @@ impl Client {
             user.avatar_url = parse::thumbnails(&body).ok().and_then(|mut m| m.remove(&user.id));
         }
         Ok(user)
+    }
+
+    /// Avatar pictures for any users. Public, no session needed.
+    pub async fn headshots(&self, ids: &[u64]) -> Result<HashMap<u64, String>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let url = format!(
+            "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={}&size=150x150&format=Png&isCircular=false",
+            join_ids(ids)
+        );
+        parse::thumbnails(&self.get(&url, None, THUMB_TTL).await?)
+    }
+
+    pub async fn presences(&self, cookie: &str, ids: &[u64]) -> Result<HashMap<u64, Presence>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let request = serde_json::json!({ "userIds": ids });
+        let body = self.send("https://presence.roblox.com/v1/presence/users", Some(&request), Some(cookie)).await?;
+        parse::presences(&body)
     }
 
     async fn icons(&self, ids: &[u64]) -> Result<HashMap<u64, String>> {

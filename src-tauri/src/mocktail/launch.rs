@@ -1,24 +1,7 @@
-//! Starts Mocktail as a child process and reports its output and exit.
+//! What Vodka knows about talking to a Mocktail process: the link it accepts,
+//! how to read its output safely, and how to judge its exit.
 
-use super::detect::APP_ID;
-use crate::error::{AppError, Result};
 use serde::Serialize;
-use std::collections::VecDeque;
-use std::process::Stdio;
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::process::Command;
-
-const LOG_LINES: usize = 400;
-
-#[derive(Default)]
-pub struct Session {
-    pub log: VecDeque<String>,
-    pub active: bool,
-}
-
-pub type SharedSession = Arc<Mutex<Session>>;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +10,11 @@ pub struct ExitReport {
     /// "closed", "forwarded" (handed to an already running Mocktail) or "crashed".
     pub outcome: &'static str,
     pub detail: Option<String>,
+}
+
+/// Mocktail prints this once the game is drawing frames.
+pub fn is_running_marker(line: &str) -> bool {
+    line.contains("[perf] present_sample")
 }
 
 pub fn launch_uri(place_id: u64) -> String {
@@ -62,81 +50,6 @@ pub fn classify_exit(code: Option<i32>, log: &[String]) -> ExitReport {
     ExitReport { code, outcome: "crashed", detail }
 }
 
-fn pump<R: AsyncRead + Unpin + Send + 'static>(reader: R, app: AppHandle, session: SharedSession) {
-    tauri::async_runtime::spawn(async move {
-        let mut lines = BufReader::new(reader).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let line = redact(&line);
-            {
-                let mut s = session.lock().unwrap();
-                if s.log.len() == LOG_LINES {
-                    s.log.pop_front();
-                }
-                s.log.push_back(line.clone());
-            }
-            let _ = app.emit("mocktail://log", line);
-        }
-    });
-}
-
-pub fn launch(
-    app: AppHandle,
-    session: SharedSession,
-    place_id: u64,
-    cookie: Option<String>,
-) -> Result<()> {
-    {
-        let mut s = session.lock().unwrap();
-        if s.active {
-            return Err(AppError::Launch("a launch is already in progress".into()));
-        }
-        s.log.clear();
-        s.active = true;
-    }
-    let mut cmd = Command::new("flatpak");
-    cmd.args(["run", APP_ID, &launch_uri(place_id)])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(cookie) = cookie {
-        // Passed through the environment so it never appears in a process list.
-        cmd.env("MOCKTAIL_ROBLOX_COOKIES", format!(".ROBLOSECURITY={cookie}"));
-    }
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            session.lock().unwrap().active = false;
-            return Err(if e.kind() == std::io::ErrorKind::NotFound {
-                AppError::FlatpakMissing
-            } else {
-                AppError::Launch(e.to_string())
-            });
-        }
-    };
-    if let Some(out) = child.stdout.take() {
-        pump(out, app.clone(), session.clone());
-    }
-    if let Some(err) = child.stderr.take() {
-        pump(err, app.clone(), session.clone());
-    }
-    tauri::async_runtime::spawn(async move {
-        let status = child.wait().await;
-        // Let the readers drain the last lines.
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        let report = {
-            let mut s = session.lock().unwrap();
-            s.active = false;
-            let log: Vec<String> = s.log.iter().cloned().collect();
-            match status {
-                Ok(st) => classify_exit(st.code(), &log),
-                Err(e) => ExitReport { code: None, outcome: "crashed", detail: Some(e.to_string()) },
-            }
-        };
-        let _ = app.emit("mocktail://exit", report);
-    });
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +64,12 @@ mod tests {
         let line = "auth .ROBLOSECURITY=_|WARNING:-DO-NOT-SHARE-THIS.--abc";
         assert!(!redact(line).contains("abc"));
         assert_eq!(redact("  [runtime] ok"), "  [runtime] ok");
+    }
+
+    #[test]
+    fn spots_the_first_rendered_frame() {
+        assert!(is_running_marker("  [perf] present_sample frame=120"));
+        assert!(!is_running_marker("  [window] Window ready; waiting for Roblox frames"));
     }
 
     #[test]

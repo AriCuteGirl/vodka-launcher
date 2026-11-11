@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { ExitReport, Game, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, ExitEvent, Game, Instance, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -29,18 +29,22 @@ async function on<T>(event: string, handler: (payload: T) => void): Promise<() =
 
 export const api = {
   mocktailStatus: () => call<MocktailStatus>("mocktail_status"),
-  launchGame: (placeId: number) => call<void>("launch_game", { placeId }),
-  sessionLog: () => call<string[]>("session_log"),
   beginLogin: () => call<void>("begin_login"),
   currentAccount: () => call<User | null>("current_account"),
-  signOut: () => call<void>("sign_out"),
+  listAccounts: () => call<Account[]>("list_accounts"),
+  switchAccount: (accountId: number) => call<void>("switch_account", { accountId }),
+  removeAccount: (accountId: number) => call<void>("remove_account", { accountId }),
   continuePlaying: () => call<Game[]>("continue_playing"),
-  favorites: (userId: number) => call<Game[]>("favorites", { userId }),
+  favorites: () => call<Game[]>("favorites"),
+  launchGame: (game: Game) => call<number>("launch_game", { game }),
+  listInstances: () => call<Instance[]>("list_instances"),
+  stopInstance: (id: number, restart: boolean) => call<void>("stop_instance", { id, restart }),
   getSettings: () => call<Settings>("get_settings"),
-  saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
-  onLog: (h: (line: string) => void) => on<string>("mocktail://log", h),
-  onExit: (h: (report: ExitReport) => void) => on<ExitReport>("mocktail://exit", h),
+  setFlags: (flags: { onboarded?: boolean; multiInstanceAccepted?: boolean }) => call<Settings>("set_flags", { flags }),
+  onInstancesChanged: (h: () => void) => on<null>("instances://changed", h),
+  onInstanceExit: (h: (event: ExitEvent) => void) => on<ExitEvent>("instances://exit", h),
+  onInstanceError: (h: (error: AppError) => void) => on<AppError>("instances://error", h),
   onSignedIn: (h: (user: User) => void) => on<User>("auth://signed-in", h),
   onLoginClosed: (h: () => void) => on<null>("auth://closed", h),
-  onAuthError: (h: (error: { kind: string; message: string }) => void) => on("auth://error", h),
+  onAuthError: (h: (error: AppError) => void) => on<AppError>("auth://error", h),
 };

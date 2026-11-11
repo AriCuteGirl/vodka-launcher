@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { app, signIn, signOut } from "$lib/state.svelte";
+  import { app, removeAccount, signIn, switchAccount } from "$lib/state.svelte";
   import Avatar from "./Avatar.svelte";
   import Button from "./Button.svelte";
   import Icon from "./Icon.svelte";
@@ -64,11 +64,20 @@
         </button>
         {#if menuOpen}
           <div class="menu" role="menu">
-            <p>Signed in as <b>@{app.account.name}</b></p>
-            <button role="menuitem" disabled title="Coming with the multi-account manager in phase 2">
-              <Icon name="plus" size={16} /> Add another account <em>Phase 2</em>
+            <p>Accounts</p>
+            {#each app.accounts as a (a.id)}
+              <button role="menuitemradio" aria-checked={a.active} onclick={() => switchAccount(a.id)}>
+                <Avatar name={a.displayName} src={a.avatarUrl} size={22} />
+                <span class="who">{a.displayName}<small>@{a.name}</small></span>
+                {#if a.active}<Icon name="check" size={16} />{:else if a.inVodkaGame}<em>In game</em>{/if}
+              </button>
+            {/each}
+            <hr />
+            <button role="menuitem" onclick={signIn}><Icon name="plus" size={16} /> Add another account</button>
+            <a role="menuitem" href="/players"><Icon name="players" size={16} /> Manage accounts</a>
+            <button role="menuitem" onclick={() => app.account && removeAccount(app.account.id)}>
+              <Icon name="signOut" size={16} /> Sign out {app.account.displayName}
             </button>
-            <button role="menuitem" onclick={signOut}><Icon name="signOut" size={16} /> Sign out</button>
           </div>
         {/if}
       {:else if app.booted}
@@ -204,7 +213,7 @@
     position: absolute;
     right: 0;
     top: calc(100% + 8px);
-    min-width: 250px;
+    min-width: 270px;
     padding: 6px;
     background: #141b24;
     border: 1px solid var(--line-strong);
@@ -217,11 +226,29 @@
     font-size: var(--fs-xs);
     color: var(--text-2);
   }
-  .menu p b {
-    font-size: inherit;
-    color: var(--text-1);
+  .menu hr {
+    margin: 6px 4px;
+    border: 0;
+    border-top: 1px solid var(--line);
   }
-  .menu button {
+  .who {
+    display: grid;
+    line-height: 1.2;
+  }
+  .who small {
+    font-size: 0.6875rem;
+    color: var(--text-2);
+  }
+  .menu :global(svg:last-child:not(:first-child)) {
+    margin-left: auto;
+    color: var(--frost);
+  }
+  .menu a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .menu button,
+  .menu a {
     display: flex;
     align-items: center;
     gap: var(--s-2);
@@ -234,6 +261,7 @@
     text-align: left;
     cursor: pointer;
   }
+  .menu a:hover,
   .menu button:hover:not(:disabled) {
     background: var(--glass-hover);
   }

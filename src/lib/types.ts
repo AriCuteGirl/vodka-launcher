@@ -28,9 +28,48 @@ export interface MocktailStatus {
   installSteps: InstallStep[];
 }
 
+export interface Presence {
+  kind: "offline" | "online" | "in_game" | "studio";
+  location: string | null;
+}
+
+export interface Account {
+  id: number;
+  name: string;
+  displayName: string;
+  avatarUrl: string | null;
+  active: boolean;
+  presence: Presence | null;
+  /** In a game that Vodka started. */
+  inVodkaGame: boolean;
+}
+
+export interface Instance {
+  id: number;
+  slot: number;
+  accountId: number;
+  accountName: string;
+  game: Game;
+  phase: "starting" | "playing";
+  startedAtMs: number;
+  cpuPercent: number;
+  memoryBytes: number;
+  log: string[];
+}
+
+export interface ExitEvent {
+  id: number;
+  game: Game;
+  accountName: string;
+  report: ExitReport;
+  log: string[];
+  restarting: boolean;
+}
+
 export interface Settings {
   onboarded: boolean;
-  shareSessionWithMocktail: boolean;
+  activeAccount: number | null;
+  multiInstanceAccepted: boolean;
 }
 
 export interface ExitReport {

@@ -13,7 +13,7 @@ pub struct User {
     pub avatar_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Game {
     pub universe_id: u64,
@@ -113,6 +113,43 @@ pub fn thumbnails(body: &str) -> Result<HashMap<u64, String>> {
         .collect())
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Presence {
+    /// "offline", "online", "in_game" or "studio".
+    pub kind: &'static str,
+    pub location: Option<String>,
+}
+
+pub fn presences(body: &str) -> Result<HashMap<u64, Presence>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Raw {
+        user_id: u64,
+        user_presence_type: u8,
+        last_location: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Body {
+        user_presences: Vec<Raw>,
+    }
+    let body: Body = serde_json::from_str(body).map_err(|e| bad("presence", e))?;
+    Ok(body
+        .user_presences
+        .into_iter()
+        .map(|p| {
+            let kind = match p.user_presence_type {
+                1 => "online",
+                2 => "in_game",
+                3 => "studio",
+                _ => "offline",
+            };
+            (p.user_id, Presence { kind, location: p.last_location.filter(|l| !l.is_empty() && kind != "offline") })
+        })
+        .collect())
+}
+
 /// Universe ids of the home page's "Continue" row, in order.
 pub fn continue_universe_ids(body: &str) -> Result<Vec<u64>> {
     #[derive(Deserialize)]
@@ -208,6 +245,15 @@ mod tests {
     fn finds_the_continue_row() {
         assert_eq!(continue_universe_ids(OMNI).unwrap(), vec![6035872082, 994732206]);
         assert!(continue_universe_ids(r#"{"sorts":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parses_live_presence_response() {
+        // Captured from presence.roblox.com on 2026-11-11.
+        let body = r#"{"userPresences":[{"userPresenceType":0,"lastLocation":"Website","placeId":null,"rootPlaceId":null,"gameId":null,"universeId":null,"userId":1},{"userPresenceType":2,"lastLocation":"RIVALS","placeId":5,"rootPlaceId":5,"gameId":"x","universeId":6,"userId":2}]}"#;
+        let p = presences(body).unwrap();
+        assert_eq!(p[&1], Presence { kind: "offline", location: None });
+        assert_eq!(p[&2], Presence { kind: "in_game", location: Some("RIVALS".into()) });
     }
 
     #[test]

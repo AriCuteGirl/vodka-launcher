@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import type { AppError, Game, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, ExitEvent, Game, Instance, MocktailStatus, Settings, User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -15,8 +15,6 @@ export const DEMO_GAMES: Game[] = [
   { universeId: 7018190066, placeId: 116495829188952, name: "Dead Rails", playing: 18859, iconUrl: null },
 ];
 
-const USER: User = { id: 1, name: "frostbyte", displayName: "Frostbyte", avatarUrl: null };
-
 const ERRORS: Record<string, AppError> = {
   ratelimited: { kind: "rate_limited", message: "Roblox is limiting requests right now. Give it a minute and retry." },
   offline: { kind: "offline", message: "Can't reach Roblox. Check your internet connection." },
@@ -26,8 +24,20 @@ const ERRORS: Record<string, AppError> = {
 
 const scenario = () => new URLSearchParams(location.search).get("demo") ?? "default";
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-let settings: Settings = { onboarded: true, shareSessionWithMocktail: false };
-let signedIn = !["onboarding", "signedout"].includes(scenario());
+const signedOut = ["onboarding", "signedout"].includes(scenario());
+
+let accounts: Account[] = signedOut
+  ? []
+  : [
+      { id: 1, name: "frostbyte", displayName: "Frostbyte", avatarUrl: null, active: true, presence: { kind: "online", location: "Website" }, inVodkaGame: false },
+      { id: 2, name: "snowmelt_alt", displayName: "Snowmelt", avatarUrl: null, active: false, presence: { kind: "offline", location: null }, inVodkaGame: false },
+    ];
+let settings: Settings = { onboarded: true, activeAccount: signedOut ? null : 1, multiInstanceAccepted: false };
+let instances: Instance[] = [];
+let nextId = 1;
+
+const active = () => accounts.find((a) => a.active) ?? null;
+const asUser = (a: Account): User => ({ id: a.id, name: a.name, displayName: a.displayName, avatarUrl: a.avatarUrl });
 
 function mocktail(): MocktailStatus {
   const missing = scenario() === "nomocktail" || scenario() === "noflatpak";
@@ -36,7 +46,7 @@ function mocktail(): MocktailStatus {
     installed: !missing,
     version: missing ? null : "1.0.5",
     robloxVersion: missing ? null : "2.742.1059",
-    running: scenario() === "running",
+    running: instances.length > 0,
     distro: "Arch Linux",
     installSteps: missing
       ? [
@@ -57,7 +67,9 @@ async function games(list: Game[]): Promise<Game[]> {
   if (s === "loading") await new Promise(() => {});
   await wait(350);
   if (s in ERRORS) throw ERRORS[s];
-  return s === "empty" ? [] : list;
+  if (s === "empty") return [];
+  // The second account has different games, so switching is visible.
+  return active()?.id === 2 ? [...list].reverse().slice(0, 4) : list;
 }
 
 type Listener = (event: { payload: unknown }) => void;
@@ -70,45 +82,109 @@ export function demoListen(name: string, handler: Listener): () => void {
   return () => listeners.get(name)?.delete(handler);
 }
 
+function exit(inst: Instance, outcome: ExitEvent["report"]["outcome"], detail: string | null, restarting = false) {
+  instances = instances.filter((i) => i.id !== inst.id);
+  const event: ExitEvent = { id: inst.id, game: inst.game, accountName: inst.accountName, report: { code: outcome === "crashed" ? 1 : 0, outcome, detail }, log: inst.log, restarting };
+  emit("instances://exit", event);
+  emit("instances://changed", null);
+}
+
+function launch(game: Game, account: Account): number {
+  if (instances.some((i) => i.accountId === account.id)) {
+    throw { kind: "launch", message: `Mocktail could not be started: ${account.displayName} is already in a game. Close it, or switch to another account.` };
+  }
+  if (instances.length >= 2) throw { kind: "launch", message: "Mocktail could not be started: Vodka can run 2 games at once, and all are in use." };
+  const inst: Instance = {
+    id: nextId++,
+    slot: instances.some((i) => i.slot === 0) ? 1 : 0,
+    accountId: account.id,
+    accountName: account.displayName,
+    game,
+    phase: "starting",
+    startedAtMs: Date.now(),
+    cpuPercent: 0,
+    memoryBytes: 180 * 1024 * 1024,
+    log: [],
+  };
+  instances.push(inst);
+  emit("instances://changed", null);
+  const lines = ["  [runtime] loaded 0 FFlag overrides", "  [auth] typed Roblox credential ready for native startup", "  [window] Window ready; waiting for Roblox frames"];
+  lines.forEach((l, i) => setTimeout(() => inst.log.push(l), 300 * (i + 1)));
+  setTimeout(() => {
+    if (!instances.includes(inst)) return;
+    if (scenario() === "crash") {
+      inst.log.push("[FATAL] Vulkan device lost");
+      return exit(inst, "crashed", "Vulkan device lost");
+    }
+    inst.phase = "playing";
+    inst.startedAtMs = Date.now();
+    inst.log.push("  [perf] present_sample frame=1");
+    emit("instances://changed", null);
+  }, 1400);
+  return inst.id;
+}
+
 export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
   const s = scenario();
   switch (cmd) {
     case "mocktail_status":
-      await wait(200);
+      await wait(150);
       return mocktail();
-    case "current_account":
-      await wait(200);
-      return signedIn ? USER : null;
+    case "current_account": {
+      await wait(150);
+      const a = active();
+      return a ? asUser(a) : null;
+    }
+    case "list_accounts":
+      return accounts.map((a) => ({ ...a, inVodkaGame: instances.some((i) => i.accountId === a.id) }));
+    case "switch_account":
+      accounts = accounts.map((a) => ({ ...a, active: a.id === args.accountId }));
+      settings.activeAccount = args.accountId as number;
+      return null;
+    case "remove_account":
+      if (instances.some((i) => i.accountId === args.accountId)) throw { kind: "other", message: "That account is in a game. Close the game first." };
+      accounts = accounts.filter((a) => a.id !== args.accountId);
+      if (!active() && accounts[0]) accounts[0].active = true;
+      settings.activeAccount = active()?.id ?? null;
+      return null;
     case "continue_playing":
       return games(DEMO_GAMES.slice(0, 6));
     case "favorites":
       return games(DEMO_GAMES.slice(3));
     case "get_settings":
       return { ...settings, onboarded: s === "onboarding" ? false : settings.onboarded };
-    case "save_settings":
-      settings = args.settings as Settings;
-      return null;
+    case "set_flags":
+      settings = { ...settings, ...(args.flags as Partial<Settings>) };
+      return settings;
     case "begin_login":
       setTimeout(() => {
-        signedIn = true;
-        emit("auth://signed-in", USER);
+        const id = accounts.length ? Math.max(...accounts.map((a) => a.id)) + 1 : 1;
+        const added: Account = { id, name: id === 1 ? "frostbyte" : `icicle_${id}`, displayName: id === 1 ? "Frostbyte" : `Icicle ${id}`, avatarUrl: null, active: true, presence: { kind: "online", location: "Website" }, inVodkaGame: false };
+        accounts = [...accounts.map((a) => ({ ...a, active: false })), added];
+        settings.activeAccount = id;
+        emit("auth://signed-in", asUser(added));
       }, 900);
       return null;
-    case "sign_out":
-      signedIn = false;
-      return null;
-    case "session_log":
-      return [];
     case "launch_game": {
       if (!mocktail().installed) throw { kind: "mocktail_missing", message: "Mocktail is not installed." };
-      const lines = ["  [runtime] loaded 0 FFlag overrides", "  [update] payload 2.742.1059 verified", "  [window] direct-vulkan surface ready", "  [perf] present_sample frame=1"];
-      lines.forEach((l, i) => setTimeout(() => emit("mocktail://log", l), 300 * (i + 1)));
-      if (s === "crash") {
-        setTimeout(() => emit("mocktail://log", "[FATAL] Vulkan device lost"), 1500);
-        setTimeout(() => emit("mocktail://exit", { code: 1, outcome: "crashed", detail: "Vulkan device lost" }), 1700);
-      } else if (s === "running") {
-        setTimeout(() => emit("mocktail://exit", { code: 0, outcome: "forwarded", detail: null }), 800);
-      }
+      const a = active();
+      if (!a) throw { kind: "not_signed_in", message: "You're not signed in to Roblox." };
+      return launch(args.game as Game, a);
+    }
+    case "list_instances":
+      return instances.map((i) => ({
+        ...i,
+        cpuPercent: i.phase === "playing" ? 80 + Math.random() * 60 : 15 + Math.random() * 20,
+        memoryBytes: (i.phase === "playing" ? 1700 + Math.random() * 60 : 400) * 1024 * 1024,
+      }));
+    case "stop_instance": {
+      const inst = instances.find((i) => i.id === args.id);
+      if (!inst) throw { kind: "other", message: "That game has already closed." };
+      const account = accounts.find((a) => a.id === inst.accountId)!;
+      setTimeout(() => {
+        exit(inst, "closed", null, args.restart as boolean);
+        if (args.restart) launch(inst.game, account);
+      }, 500);
       return null;
     }
   }

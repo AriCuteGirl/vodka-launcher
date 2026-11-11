@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, saveSettings, signIn } from "$lib/state.svelte";
+  import { app, setFlags, signIn } from "$lib/state.svelte";
   import Avatar from "./Avatar.svelte";
   import Button from "./Button.svelte";
   import Icon from "./Icon.svelte";
@@ -8,7 +8,7 @@
 
   let step = $state(0);
   const steps = ["Mocktail", "Account", "Ready"];
-  const finish = () => saveSettings({ onboarded: true });
+  const finish = () => setFlags({ onboarded: true });
 </script>
 
 <div class="onboarding">

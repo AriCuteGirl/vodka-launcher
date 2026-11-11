@@ -14,6 +14,12 @@ export function elapsed(seconds: number): string {
   return `${m}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
+/** Bytes -> "512 MB" or "1.4 GB". */
+export function memory(bytes: number): string {
+  const mb = bytes / 1024 / 1024;
+  return mb < 1000 ? `${Math.round(mb)} MB` : `${(mb / 1024).toFixed(1)} GB`;
+}
+
 /** Case- and accent-insensitive "does this name match the search box". */
 export function matches(name: string, query: string): boolean {
   const norm = (s: string) => s.normalize("NFKD").replace(/[^\p{L}\p{N} ]/gu, "").toLowerCase();

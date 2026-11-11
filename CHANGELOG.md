@@ -2,6 +2,15 @@
 
 ## 0.1.0 (unreleased)
 
+Phase 2: accounts and instances.
+
+- Several Roblox accounts: add, switch and remove them on the Players page or from the title strip. Each session has its own keyring entry.
+- Each account plays in its own Mocktail profile (data, cache, state). The Roblox client files are hard-linked, so a profile costs almost no disk space.
+- Vodka signs Mocktail in as the selected account and deletes Mocktail's copy of the session when the game closes.
+- Up to two games at once, one per account, behind a one-time warning.
+- Running games show CPU and memory, with Restart and Close.
+- Account presence (online, in a game) on the Players page.
+
 Phase 1: first vertical slice.
 
 - App shell: icon sidebar, title strip with search, back/forward and account menu, right rail.
