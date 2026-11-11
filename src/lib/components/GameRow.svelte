@@ -70,7 +70,7 @@
   {:else}
     <div class="grid" bind:this={scroller}>
       {#each visible as game (game.universeId)}
-        <GameTile {game} onplay={play} disabled={!canPlay} busy={app.playing?.game.universeId === game.universeId} />
+        <GameTile {game} onplay={play} disabled={!canPlay} phase={app.playing?.game.universeId === game.universeId ? app.playing.phase : "idle"} />
       {/each}
     </div>
   {/if}

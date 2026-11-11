@@ -101,7 +101,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return [];
     case "launch_game": {
       if (!mocktail().installed) throw { kind: "mocktail_missing", message: "Mocktail is not installed." };
-      const lines = ["  [runtime] loaded 0 FFlag overrides", "  [update] payload 2.742.1059 verified", "  [window] direct-vulkan surface ready"];
+      const lines = ["  [runtime] loaded 0 FFlag overrides", "  [update] payload 2.742.1059 verified", "  [window] direct-vulkan surface ready", "  [perf] present_sample frame=1"];
       lines.forEach((l, i) => setTimeout(() => emit("mocktail://log", l), 300 * (i + 1)));
       if (s === "crash") {
         setTimeout(() => emit("mocktail://log", "[FATAL] Vulkan device lost"), 1500);

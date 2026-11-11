@@ -3,8 +3,13 @@
   import type { Game } from "$lib/types";
   import Icon from "./Icon.svelte";
 
-  let { game, onplay, disabled = false, busy = false }: { game: Game; onplay: (game: Game) => void; disabled?: boolean; busy?: boolean } =
-    $props();
+  let {
+    game,
+    onplay,
+    disabled = false,
+    phase = "idle",
+  }: { game: Game; onplay: (game: Game) => void; disabled?: boolean; phase?: "idle" | "starting" | "playing" } = $props();
+  const busy = $derived(phase !== "idle");
   let failed = $state(false);
 </script>
 
@@ -16,7 +21,7 @@
       <span class="fallback" aria-hidden="true">{game.name.replace(/[^\p{L}\p{N}]/gu, "").slice(0, 1).toUpperCase() || "?"}</span>
     {/if}
     <span class="play" aria-hidden="true">
-      {#if busy}<span class="dot"></span>Starting{:else}<Icon name="play" size={16} filled />Play{/if}
+      {#if phase === "starting"}<span class="dot"></span>Starting{:else if phase === "playing"}<span class="dot live"></span>Playing{:else}<Icon name="play" size={16} filled />Play{/if}
     </span>
   </span>
   <span class="name">{game.name}</span>
@@ -138,6 +143,10 @@
     border-radius: 50%;
     background: var(--frost-ink);
     animation: pulse 1s ease-in-out infinite;
+  }
+  .dot.live {
+    background: #0a7a4c;
+    animation: none;
   }
   @keyframes pulse {
     50% {

@@ -11,6 +11,21 @@ export interface Toast {
 export interface Playing {
   game: Game;
   startedAt: number;
+  /** "starting" until Mocktail is drawing frames, then "playing". */
+  phase: "starting" | "playing";
+}
+
+/** Mocktail prints this once the game is on screen. */
+export function isRunningMarker(line: string): boolean {
+  return line.includes("[perf] present_sample");
+}
+
+function markPlaying() {
+  if (app.playing?.phase === "starting") {
+    app.playing.phase = "playing";
+    app.playing.startedAt = Date.now();
+    void refreshMocktail();
+  }
 }
 
 export const app = $state({
@@ -102,11 +117,18 @@ export async function signOut() {
 
 export async function play(game: Game) {
   if (app.playing) {
-    toast(`${app.playing.game.name} is still starting. Give it a moment.`);
+    toast(
+      app.playing.phase === "starting"
+        ? `${app.playing.game.name} is still starting. Give it a moment.`
+        : `${app.playing.game.name} is running. Close it before starting another game.`,
+    );
     return;
   }
   app.log = [];
-  app.playing = { game, startedAt: Date.now() };
+  const session: Playing = { game, startedAt: Date.now(), phase: "starting" };
+  app.playing = session;
+  // Fallback in case a Mocktail update renames the log line we watch for.
+  setTimeout(() => app.playing?.game === session.game && markPlaying(), 30_000);
   try {
     await api.launchGame(game.placeId);
   } catch (e) {
@@ -134,6 +156,7 @@ export async function boot() {
   window.addEventListener("online", () => (app.online = true));
   window.addEventListener("offline", () => (app.online = false));
   await api.onLog((line) => {
+    if (isRunningMarker(line)) markPlaying();
     app.log.push(line);
     if (app.log.length > 400) app.log.splice(0, app.log.length - 400);
   });

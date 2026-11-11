@@ -3,6 +3,7 @@
   import Button from "./Button.svelte";
 
   const last = $derived(app.continuePlaying.status === "ready" ? (app.continuePlaying.data[0] ?? null) : null);
+  const mine = $derived(last && app.playing?.game.universeId === last.universeId ? app.playing : null);
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Still up" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 </script>
@@ -35,9 +36,13 @@
     {#if last}
       <h1>Jump back into <span>{last.name}</span></h1>
       <div class="cta">
-        <Button variant="primary" size="lg" icon="play" disabled={!app.mocktail?.installed} busy={app.playing?.game.universeId === last.universeId} onclick={() => play(last)}>
-          Play now
-        </Button>
+        {#if mine?.phase === "playing"}
+          <span class="live"><i></i>Playing now</span>
+        {:else}
+          <Button variant="primary" size="lg" icon="play" disabled={!app.mocktail?.installed} busy={mine?.phase === "starting"} onclick={() => play(last)}>
+            {mine ? "Starting" : "Play now"}
+          </Button>
+        {/if}
         {#if !app.mocktail?.installed}<span class="faint">Install Mocktail to play</span>{/if}
       </div>
     {:else}
@@ -112,6 +117,25 @@
     align-items: center;
     gap: var(--s-3);
     font-size: var(--fs-sm);
+  }
+  .live {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+    height: 46px;
+    padding: 0 var(--s-5);
+    border-radius: var(--r-md);
+    border: 1px solid rgba(116, 230, 180, 0.4);
+    background: rgba(116, 230, 180, 0.1);
+    color: var(--ok);
+    font-weight: 650;
+  }
+  .live i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 10px var(--ok);
   }
   .cover {
     position: absolute;

@@ -36,7 +36,7 @@
   {#if app.playing}
     <section class="glass session">
       <header>
-        <h2>Now starting</h2>
+        <h2>{app.playing.phase === "playing" ? "Now playing" : "Now starting"}</h2>
         <span class="time"><Icon name="clock" size={14} />{elapsed((now - app.playing.startedAt) / 1000)}</span>
       </header>
       <p class="game">{app.playing.game.name}</p>

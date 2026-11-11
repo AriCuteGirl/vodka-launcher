@@ -63,8 +63,9 @@
     <h2>Game tiles</h2>
     <div class="tiles">
       <GameTile game={DEMO_GAMES[0]} onplay={() => {}} />
-      <GameTile game={DEMO_GAMES[1]} onplay={() => {}} busy />
+      <GameTile game={DEMO_GAMES[1]} onplay={() => {}} phase="starting" />
       <GameTile game={DEMO_GAMES[9]} onplay={() => {}} />
+      <GameTile game={DEMO_GAMES[2]} onplay={() => {}} phase="playing" />
       <GameTile game={DEMO_GAMES[3]} onplay={() => {}} disabled />
     </div>
   </section>

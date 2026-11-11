@@ -157,7 +157,7 @@
     font-size: inherit;
     word-break: break-all;
   }
-  @media (max-width: 1080px) {
+  @media (max-width: 860px) {
     .body :global(.rail) {
       display: none;
     }
