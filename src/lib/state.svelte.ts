@@ -61,8 +61,12 @@ export async function loadHome() {
     }
   };
   await Promise.all([
-    settle(api.continuePlaying).then((r) => (app.continuePlaying = r)),
-    settle(() => api.favorites(user.id)).then((r) => (app.favorites = r)),
+    settle(api.continuePlaying).then((r) => {
+      app.continuePlaying = r;
+    }),
+    settle(() => api.favorites(user.id)).then((r) => {
+      app.favorites = r;
+    }),
   ]);
 }
 
