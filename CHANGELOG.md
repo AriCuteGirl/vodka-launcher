@@ -5,6 +5,9 @@
 Phase 4 (in progress): social.
 
 - Up to 10 games at once instead of 2: games beyond the second run from their own copy of Mocktail's binary. A five-second reminder shows each time another game is added.
+- Parties: up to six Vodka users with a shared chat; the leader can bring everyone into the game they are playing.
+- Avatar page: see your current look and switch between saved outfits.
+- A running game's name and icon follow you when you switch games inside Roblox.
 - Vodka chat (opt-in): message other Vodka users and invite them to your game, through Vodka's own server. Contacts are added by Vodka code; block, report and account deletion are built in.
 - Server picker on every game tile: let Roblox choose, fewest players, a specific public server, or a private server you can join.
 - Tick several accounts on Players and the next Play or Join starts for all of them, in the same server when one is chosen.

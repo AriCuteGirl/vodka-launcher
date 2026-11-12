@@ -9,8 +9,12 @@ use crate::error::{AppError, Result};
 use serde_json::{Value, json};
 use std::time::Duration;
 
-/// The one address this module talks to.
+/// The only addresses this module talks to: the chat function and the party function of Vodka's server.
 const SERVER: &str = "https://tcmfsivvjinjqpppkmhk.supabase.co/functions/v1/vodka";
+const PARTY_SERVER: &str = "https://tcmfsivvjinjqpppkmhk.supabase.co/functions/v1/vodka-party";
+
+/// What a party member may ask the party server to do.
+pub const PARTY_ACTIONS: [&str; 9] = ["sync", "create", "invite", "accept", "decline", "leave", "kick", "send", "launch"];
 const KEYRING_SERVICE: &str = "vodka-launcher";
 
 pub fn entry_name(account_id: u64) -> String {
@@ -78,9 +82,21 @@ impl Client {
     }
 
     /// Sends one action. `token` is the chat sign-in, for actions that need one.
-    pub async fn call(&self, token: Option<&str>, mut body: Value, action: &str) -> Result<Value> {
+    pub async fn call(&self, token: Option<&str>, body: Value, action: &str) -> Result<Value> {
+        self.post(SERVER, token, body, action).await
+    }
+
+    /// Sends one party action. Anything not on the list is refused before it leaves this computer.
+    pub async fn party(&self, token: &str, body: Value, action: &str) -> Result<Value> {
+        if !PARTY_ACTIONS.contains(&action) {
+            return Err(AppError::Chat("Vodka doesn't know that party action.".into()));
+        }
+        self.post(PARTY_SERVER, Some(token), body, action).await
+    }
+
+    async fn post(&self, server: &'static str, token: Option<&str>, mut body: Value, action: &str) -> Result<Value> {
         body["action"] = json!(action);
-        let mut req = self.http.post(SERVER).json(&body);
+        let mut req = self.http.post(server).json(&body);
         if let Some(t) = token {
             req = req.header("x-vodka-token", t);
         }
@@ -98,8 +114,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn server_address_is_fixed_and_https() {
+    fn server_addresses_are_fixed_and_https() {
         assert!(SERVER.starts_with("https://") && SERVER.ends_with("/functions/v1/vodka"));
+        assert_eq!(PARTY_SERVER, format!("{SERVER}-party"));
+        assert!(PARTY_ACTIONS.contains(&"launch") && !PARTY_ACTIONS.contains(&"delete_account"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import { NO_OPTIONS, type Account, type AppError, type ChatContact, type ChatMessage, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, type Account, type AppError, type ChatContact, type ChatMessage, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -108,6 +108,11 @@ let chatMessages: ChatMessage[] = [
   { id: 2, sender: 1, recipient: 301, kind: "text", body: "yeah give me a sec", payload: null, createdAt: new Date(Date.now() - 540_000).toISOString() },
   { id: 3, sender: 301, recipient: 1, kind: "invite", body: "", payload: { game: DEMO_GAMES[0], placeId: 17625359962, gameId: "0f0e-11" }, createdAt: new Date(Date.now() - 60_000).toISOString() },
 ];
+let demoParty: Party | null = null;
+let demoPartyEvents: PartyEvent[] = [];
+let partyEventId = 0;
+const partyEvent = (sender: number | null, kind: PartyEvent["kind"], body: string, payload: PartyEvent["payload"] = null) =>
+  demoPartyEvents.push({ id: ++partyEventId, sender, kind, body, payload, createdAt: new Date().toISOString() });
 const chatGuard = () => {
   if (!chatOn) throw { kind: "chat_signed_out", message: "You're not signed in to Vodka chat on this account." };
 };
@@ -304,6 +309,51 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       };
       chatMessages = [...chatMessages, message];
       return { message };
+    }
+    case "party": {
+      chatGuard();
+      const a = (args.args ?? {}) as Record<string, unknown>;
+      const meContact = { robloxId: 1, name: "frostbyte", displayName: "Frostbyte", online: true };
+      switch (args.action) {
+        case "sync":
+          return { party: demoParty, invites: demoParty ? [] : [{ partyId: 9, from: "Glacier" }], events: demoPartyEvents.filter((e) => e.id > ((a.since as number) ?? 0)) };
+        case "create":
+          demoParty = { id: 1, leader: 1, members: [meContact], pending: [] };
+          demoPartyEvents = [];
+          partyEvent(null, "system", "Frostbyte started the party.");
+          return { ok: true };
+        case "accept":
+          demoParty = { id: 9, leader: 301, members: [chatContacts[0], meContact], pending: [] };
+          demoPartyEvents = [];
+          partyEvent(null, "system", "Frostbyte joined.");
+          partyEvent(301, "text", "nice, hopping into RIVALS in a sec");
+          return { ok: true };
+        case "decline":
+          return { ok: true };
+        case "invite":
+          if (demoParty) {
+            const c = chatContacts.find((x) => x.robloxId === a.robloxId);
+            if (c) {
+              demoParty = { ...demoParty, members: [...demoParty.members, c] };
+              partyEvent(null, "system", `${c.displayName} joined.`);
+            }
+          }
+          return { ok: true };
+        case "kick":
+          if (demoParty) demoParty = { ...demoParty, members: demoParty.members.filter((m) => m.robloxId !== a.robloxId) };
+          return { ok: true };
+        case "send":
+          partyEvent(1, "text", String(a.body).trim());
+          return { ok: true };
+        case "launch":
+          if (!instances.some((i) => i.accountId === active()?.id)) throw { kind: "chat", message: "Start a game first, then invite people to it." };
+          partyEvent(1, "launch", "", { game: DEMO_GAMES[0], placeId: 17625359962, gameId: "0f0e-11" });
+          return { ok: true };
+        case "leave":
+          demoParty = null;
+          return { ok: true };
+      }
+      throw { kind: "chat", message: "Vodka doesn't know that party action." };
     }
     case "chat_sign_out":
     case "chat_delete_account":

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { acceptInvite, chat, markSeen, sendInvite, sendText, syncChat, unreadFor } from "$lib/chat.svelte";
+  import { acceptInvite, chat, markSeen, partyDo, seeParty, sendInvite, sendText, syncChat, unreadFor } from "$lib/chat.svelte";
   import Avatar from "$lib/components/Avatar.svelte";
   import Button from "$lib/components/Button.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -35,6 +35,28 @@
   const sorted = $derived(
     [...chat.contacts].sort((a, b) => Number(b.online) - Number(a.online) || a.displayName.localeCompare(b.displayName)),
   );
+
+  const party = $derived(chat.party);
+  const inParty = $derived(chat.open === "party" && !!party);
+  const leading = $derived(!!party && party.leader === me);
+  const invitable = $derived(party ? chat.contacts.filter((c) => !party.members.some((m) => m.robloxId === c.robloxId) && !party.pending.includes(c.robloxId)) : []);
+  const nameIn = (id: number | null) => party?.members.find((m) => m.robloxId === id)?.displayName ?? "Someone";
+  let partyDraft = $state("");
+  let partyThread = $state<HTMLElement>();
+
+  $effect(() => {
+    void chat.partyEvents.length;
+    if (!inParty) return;
+    seeParty();
+    void tick().then(() => partyThread?.scrollTo({ top: partyThread.scrollHeight }));
+  });
+
+  async function sendParty() {
+    const text = partyDraft.trim();
+    if (!text) return;
+    partyDraft = "";
+    if (!(await partyDo("send", { body: text }))) partyDraft = text;
+  }
 
   // Keep the newest message in view and count it as read.
   $effect(() => {
@@ -200,6 +222,25 @@
           <input bind:value={code} placeholder="Add by code: VDK-…" spellcheck="false" autocomplete="off" aria-label="Someone's Vodka code" maxlength="20" />
           <Button type="submit" size="sm" icon="plus" busy={adding} disabled={!code.trim()} aria-label="Add contact" />
         </form>
+        <div class="partybox">
+          <span class="label">Party</span>
+          {#each chat.partyInvites as inv (inv.partyId)}
+            <div class="pinvite">
+              <span><b>{inv.from}</b> invited you</span>
+              <Button size="sm" variant="primary" onclick={async () => (await partyDo("accept", { partyId: inv.partyId })) && (chat.open = "party")}>Join</Button>
+              <Button size="sm" variant="ghost" onclick={() => partyDo("decline", { partyId: inv.partyId })}>No</Button>
+            </div>
+          {/each}
+          {#if party}
+            <button class="partybtn" class:selected={chat.open === "party"} onclick={() => (chat.open = "party")}>
+              <Icon name="players" size={18} />
+              <span class="who"><b>Your party</b><small>{party.members.length} of 6{leading ? " · you lead" : ""}</small></span>
+              {#if chat.partyUnread}<i>{chat.partyUnread}</i>{/if}
+            </button>
+          {:else}
+            <Button size="sm" icon="plus" onclick={async () => (await partyDo("create")) && (chat.open = "party")}>Start a party</Button>
+          {/if}
+        </div>
         {#if sorted.length === 0}
           <p class="faint empty">No contacts yet. Swap codes with a friend who uses Vodka.</p>
         {:else}
@@ -223,7 +264,80 @@
       </aside>
 
       <section class="glass thread">
-        {#if !peer}
+        {#if inParty && party}
+          <header>
+            <span class="pbadge"><Icon name="players" size={18} /></span>
+            <div class="who"><b>Your party</b><small>{party.members.length} of 6 · up to six people</small></div>
+            {#if leading}
+              <Button size="sm" variant="primary" icon="play" disabled={!myInstance()} title={myInstance() ? "" : "Start a game first"} onclick={() => partyDo("launch", {}, "Called the party into your game.")}>
+                Bring party to my game
+              </Button>
+            {/if}
+            <Button size="sm" variant="danger" onclick={() => partyDo("leave", {}, leading ? "Party ended." : "You left the party.")}>{leading ? "End party" : "Leave"}</Button>
+          </header>
+          <div class="members">
+            {#each party.members as m (m.robloxId)}
+              <span class="member" class:off={!m.online}>
+                <Avatar name={m.displayName} src={chat.pictures[String(m.robloxId)]} size={22} status={m.online ? "online" : undefined} />
+                {m.displayName}{#if m.robloxId === party.leader}<em>leader</em>{/if}
+                {#if leading && m.robloxId !== me}
+                  <button aria-label="Remove {m.displayName} from the party" onclick={() => partyDo("kick", { robloxId: m.robloxId })}><Icon name="close" size={12} /></button>
+                {/if}
+              </span>
+            {/each}
+            {#if party.pending.length}<span class="member off">{party.pending.length} invited</span>{/if}
+            {#if invitable.length && party.members.length + party.pending.length < 6}
+              <select
+                aria-label="Invite a contact to the party"
+                onchange={(e) => {
+                  const id = Number(e.currentTarget.value);
+                  e.currentTarget.value = "";
+                  if (id) void partyDo("invite", { robloxId: id }, "Invite sent.");
+                }}
+              >
+                <option value="">+ Invite…</option>
+                {#each invitable as c (c.robloxId)}<option value={c.robloxId}>{c.displayName}</option>{/each}
+              </select>
+            {/if}
+          </div>
+          <div class="messages" bind:this={partyThread} aria-live="polite">
+            {#each chat.partyEvents as e (e.id)}
+              {#if e.kind === "system"}
+                <p class="sys">{e.body}</p>
+              {:else}
+                <div class="msg" class:own={e.sender === me}>
+                  {#if e.sender !== me}<small class="from">{nameIn(e.sender)}</small>{/if}
+                  {#if e.kind === "launch" && e.payload}
+                    <div class="invite">
+                      {#if e.payload.game.iconUrl}<img src={e.payload.game.iconUrl} alt="" />{/if}
+                      <div>
+                        <small>{e.sender === me ? "You called the party into" : "Party is going to"}</small>
+                        <b>{e.payload.game.name}</b>
+                        <small>{e.payload.gameId ? "Same server" : "Any server"}</small>
+                      </div>
+                      {#if e.sender !== me}
+                        <Button size="sm" variant="primary" icon="play" disabled={!app.mocktail?.installed} onclick={() => acceptInvite(e.payload!)}>Join</Button>
+                      {/if}
+                    </div>
+                  {:else}
+                    <p class="selectable">{e.body}</p>
+                  {/if}
+                  <time datetime={e.createdAt}>{time(e.createdAt)}</time>
+                </div>
+              {/if}
+            {/each}
+          </div>
+          <form
+            class="composer"
+            onsubmit={(e) => {
+              e.preventDefault();
+              void sendParty();
+            }}
+          >
+            <input bind:value={partyDraft} placeholder="Message the party" maxlength="1000" autocomplete="off" aria-label="Party message" />
+            <Button type="submit" variant="primary" icon="send" disabled={!partyDraft.trim()} aria-label="Send" />
+          </form>
+        {:else if !peer}
           <div class="pick"><Icon name="chat" size={32} /><p class="muted">Pick someone on the left to start talking.</p></div>
         {:else}
           <header>
@@ -507,6 +621,131 @@
     height: 30px;
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
+  }
+  .partybox {
+    display: grid;
+    gap: 6px;
+    padding-bottom: var(--s-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .pinvite {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 6px 6px var(--s-2);
+    border-radius: var(--r-sm);
+    border: 1px solid rgba(164, 222, 255, 0.4);
+    background: var(--glass-hover);
+    font-size: var(--fs-xs);
+  }
+  .pinvite span {
+    flex: 1;
+    min-width: 0;
+  }
+  .partybtn {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    width: 100%;
+    padding: 8px var(--s-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--glass);
+    color: var(--frost);
+    text-align: left;
+    cursor: pointer;
+  }
+  .partybtn:hover,
+  .partybtn.selected {
+    background: var(--glass-strong);
+    border-color: var(--line-strong);
+  }
+  .partybtn b {
+    color: var(--text-0);
+  }
+  .partybtn i {
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: var(--r-full);
+    background: var(--frost);
+    color: var(--frost-ink);
+    font-size: 0.6875rem;
+    font-style: normal;
+    font-weight: 700;
+    text-align: center;
+  }
+  .pbadge {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--glass-strong);
+    color: var(--frost);
+  }
+  .members {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: var(--s-2) var(--s-4);
+    border-bottom: 1px solid var(--line);
+  }
+  .member {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px 3px 4px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--line);
+    background: var(--glass);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+  }
+  .member.off {
+    color: var(--text-2);
+    padding-left: 10px;
+  }
+  .member em {
+    font-style: normal;
+    font-weight: 500;
+    color: var(--frost);
+  }
+  .member button {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .member button:hover {
+    color: var(--danger);
+  }
+  .members select {
+    height: 28px;
+    padding: 0 var(--s-2);
+    border-radius: var(--r-full);
+    border: 1px dashed var(--line-strong);
+    background: transparent;
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+  }
+  .members option {
+    background: #141b24;
+  }
+  .sys {
+    align-self: center;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+  }
+  .from {
+    font-weight: 600;
+    color: var(--text-1);
   }
   .empty {
     font-size: var(--fs-sm);

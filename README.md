@@ -16,6 +16,8 @@ A Roblox launcher for Linux. Vodka is the front end; [Mocktail](https://github.c
 - Runs several games at once (up to 10), one per account, with FPS, CPU and memory per game.
 - Searches all of Roblox and shows the public charts.
 - Shows your friends, what they're playing, and friend requests; joins a friend's server when Roblox shares it.
+- Has its own opt-in chat and parties (up to six) between Vodka users, with game invites.
+- Switches between your saved avatar outfits.
 - Sets frame rate, graphics and FFlags for all accounts or per account, and can hold or roll back the Roblox client.
 
 Running more than one Roblox client at once is not supported by Mocktail's developers and is against Roblox's Terms of Use. Vodka warns

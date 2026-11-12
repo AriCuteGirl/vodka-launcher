@@ -562,24 +562,47 @@ async fn chat_send(app: AppHandle, state: State<'_, AppState>, to: u64, body: St
     chat_call(&app, &state, "send", serde_json::json!({ "to": to, "kind": "text", "body": body })).await
 }
 
-/// Invites someone to the game the active account is playing through Vodka, with its exact server when Roblox shares it.
-#[tauri::command]
-async fn chat_invite(app: AppHandle, state: State<'_, AppState>, to: u64) -> Result<serde_json::Value> {
-    let account = active_account(&app)?.ok_or(AppError::NotSignedIn)?;
+/// The game the active account is playing through Vodka, as an invite: with its exact server when Roblox shares it.
+async fn my_game_invite(app: &AppHandle, state: &AppState) -> Result<serde_json::Value> {
+    let account = active_account(app)?.ok_or(AppError::NotSignedIn)?;
     let manager = state.instances.clone();
     let running = blocking(move || Ok(instances::list(&manager))).await?;
     let mine = running
         .into_iter()
         .find(|i| i.account_id == account.id)
         .ok_or_else(|| AppError::Chat("Start a game first, then invite people to it.".into()))?;
-    let here = own_presence(&app, &state.api, account.id).await;
+    let here = own_presence(app, &state.api, account.id).await;
     let server = here.as_ref().and_then(|p| p.join_target());
-    let payload = serde_json::json!({
+    Ok(serde_json::json!({
         "game": mine.game,
         "placeId": server.map(|(place, _)| place).unwrap_or(mine.game.place_id),
         "gameId": server.map(|(_, id)| id),
-    });
+    }))
+}
+
+/// Invites one contact to the game the active account is playing.
+#[tauri::command]
+async fn chat_invite(app: AppHandle, state: State<'_, AppState>, to: u64) -> Result<serde_json::Value> {
+    let payload = my_game_invite(&app, &state).await?;
     chat_call(&app, &state, "send", serde_json::json!({ "to": to, "kind": "invite", "body": "", "payload": payload })).await
+}
+
+/// Runs a party action for the active account. "launch" calls the whole party into the game being played.
+#[tauri::command]
+async fn party(app: AppHandle, state: State<'_, AppState>, action: String, args: Option<serde_json::Value>) -> Result<serde_json::Value> {
+    let mut body = args.filter(|a| a.is_object()).unwrap_or_else(|| serde_json::json!({}));
+    if action == "launch" {
+        body = serde_json::json!({ "payload": my_game_invite(&app, &state).await? });
+    }
+    let (account, token) = chat_session(&app).await?;
+    match state.chat.party(&token, body, &action).await {
+        Err(AppError::ChatSignedOut) => {
+            let id = account.id;
+            let _ = blocking(move || chat::clear_token(id)).await;
+            Err(AppError::ChatSignedOut)
+        }
+        other => other,
+    }
 }
 
 /// Turns chat off on this computer for the active account. The chat account itself stays.
@@ -661,6 +684,7 @@ pub fn run() {
             chat_report,
             chat_send,
             chat_invite,
+            party,
             chat_sign_out,
             chat_delete_account
         ])

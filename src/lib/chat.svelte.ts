@@ -1,7 +1,7 @@
 // Vodka's own chat: state and actions. Opt-in per account; nothing is contacted until it's turned on.
 import { api } from "./api";
 import { app, launchMany, toast } from "./state.svelte";
-import { toAppError, type ChatContact, type ChatInvite, type ChatMe, type ChatMessage } from "./types";
+import { toAppError, type ChatContact, type ChatInvite, type ChatMe, type ChatMessage, type Party, type PartyEvent, type PartyInvite } from "./types";
 
 export const chat = $state({
   /** "unknown" until checked, "off" when not turned on for the active account. */
@@ -15,8 +15,13 @@ export const chat = $state({
   lastId: 0,
   /** Newest message id the user has seen, per contact. */
   seen: {} as Record<string, number>,
-  /** Whose conversation is open on the Chat page. */
-  open: null as number | null,
+  /** What is open on the Chat page: a contact's id, the party, or nothing. */
+  open: null as number | "party" | null,
+  party: null as Party | null,
+  partyEvents: [] as PartyEvent[],
+  partyLastId: 0,
+  partyInvites: [] as PartyInvite[],
+  partyUnread: 0,
   /** True while the Chat page is on screen (faster refresh, no toasts). */
   visible: false,
   unreadTotal: 0,
@@ -45,7 +50,7 @@ export function unreadFor(contactId: number): number {
 }
 
 function recount() {
-  chat.unreadTotal = chat.contacts.reduce((n, c) => n + unreadFor(c.robloxId), 0);
+  chat.unreadTotal = chat.contacts.reduce((n, c) => n + unreadFor(c.robloxId), 0) + chat.partyUnread + chat.partyInvites.length;
 }
 
 export function markSeen(contactId: number) {
@@ -71,6 +76,11 @@ function reset(accountId: number | null) {
   chat.messages = [];
   chat.lastId = 0;
   chat.open = null;
+  chat.party = null;
+  chat.partyEvents = [];
+  chat.partyLastId = 0;
+  chat.partyInvites = [];
+  chat.partyUnread = 0;
   chat.seen = accountId == null ? {} : loadSeen(accountId);
   chat.unreadTotal = 0;
 }
@@ -112,7 +122,8 @@ export async function syncChat() {
         }
       }
     }
-    if (chat.visible && chat.open != null) markSeen(chat.open);
+    if (chat.visible && typeof chat.open === "number") markSeen(chat.open);
+    await syncParty(accountId);
     recount();
   } catch (e) {
     const error = toAppError(e);
@@ -128,6 +139,73 @@ export async function syncChat() {
     }
   } finally {
     syncing = false;
+  }
+}
+
+/** Party state: who is in it, what was said, and invites waiting for an answer. */
+async function syncParty(accountId: number) {
+  let data;
+  try {
+    data = await api.partySync(chat.partyLastId);
+  } catch {
+    // The party is an extra on top of chat; a failed refresh just tries again next round.
+    return;
+  }
+  if (app.account?.id !== accountId) return;
+  const me = chat.me?.robloxId;
+  const known = new Set(chat.partyInvites.map((i) => i.partyId));
+  for (const inv of data.invites) {
+    if (!known.has(inv.partyId) && !chat.visible) toast(`${inv.from} invited you to a party. Open Chat to answer.`);
+  }
+  chat.partyInvites = data.invites;
+  if (!data.party) {
+    if (chat.party) toast("Your party ended.");
+    chat.party = null;
+    chat.partyEvents = [];
+    chat.partyLastId = 0;
+    chat.partyUnread = 0;
+    if (chat.open === "party") chat.open = null;
+    return;
+  }
+  const first = chat.party?.id !== data.party.id;
+  if (first) {
+    chat.partyEvents = [];
+    chat.partyUnread = 0;
+  }
+  chat.party = data.party;
+  if (data.events.length) {
+    const have = new Set(chat.partyEvents.map((e) => e.id));
+    const fresh = data.events.filter((e) => !have.has(e.id));
+    chat.partyEvents = [...chat.partyEvents, ...fresh];
+    chat.partyLastId = Math.max(chat.partyLastId, ...data.events.map((e) => e.id));
+    const watching = chat.visible && chat.open === "party";
+    for (const e of fresh) {
+      if (first || watching || e.sender === me || e.kind === "system") continue;
+      chat.partyUnread++;
+      const who = data.party.members.find((m) => m.robloxId === e.sender)?.displayName ?? "Someone";
+      toast(e.kind === "launch" ? `${who} is calling the party into ${e.payload?.game.name ?? "a game"}. Open Chat to join.` : `Party · ${who}: ${e.body.slice(0, 80)}`);
+    }
+  }
+}
+
+/** Marks the party conversation as read. */
+export function seeParty() {
+  if (chat.partyUnread) {
+    chat.partyUnread = 0;
+    recount();
+  }
+}
+
+/** Runs a party action, then refreshes. Returns whether it worked. */
+export async function partyDo(action: Parameters<typeof api.party>[0], args: Record<string, unknown> = {}, done?: string): Promise<boolean> {
+  try {
+    await api.party(action, args);
+    await syncChat();
+    if (done) toast(done, "ok");
+    return true;
+  } catch (e) {
+    toast(toAppError(e).message, "danger");
+    return false;
   }
 }
 

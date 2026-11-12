@@ -82,6 +82,35 @@ export interface ChatSync {
   messages: ChatMessage[];
 }
 
+export interface Party {
+  id: number;
+  leader: number;
+  members: ChatContact[];
+  /** User ids with an open invite. */
+  pending: number[];
+}
+
+export interface PartyEvent {
+  id: number;
+  /** null for system lines such as "X joined". */
+  sender: number | null;
+  kind: "text" | "launch" | "system";
+  body: string;
+  payload: ChatInvite | null;
+  createdAt: string;
+}
+
+export interface PartyInvite {
+  partyId: number;
+  from: string;
+}
+
+export interface PartySync {
+  party: Party | null;
+  invites: PartyInvite[];
+  events: PartyEvent[];
+}
+
 export interface Outfit {
   id: number;
   name: string;

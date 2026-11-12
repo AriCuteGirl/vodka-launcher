@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { Account, AppError, AvatarView, Chart, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, AvatarView, Chart, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -67,6 +67,9 @@ export const api = {
   chatReport: (userId: number, reason: string) => call<unknown>("chat_report", { userId, reason }),
   chatSend: (to: number, body: string) => call<{ message: ChatMessage }>("chat_send", { to, body }),
   chatInvite: (to: number) => call<{ message: ChatMessage }>("chat_invite", { to }),
+  partySync: (since: number) => call<PartySync>("party", { action: "sync", args: { since } }),
+  party: (action: "create" | "invite" | "accept" | "decline" | "leave" | "kick" | "send" | "launch", args: Record<string, unknown> = {}) =>
+    call<unknown>("party", { action, args }),
   chatSignOut: () => call<void>("chat_sign_out"),
   chatDeleteAccount: () => call<void>("chat_delete_account"),
   onInstancesChanged: (h: () => void) => on<null>("instances://changed", h),
