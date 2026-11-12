@@ -113,6 +113,182 @@ pub fn thumbnails(body: &str) -> Result<HashMap<u64, String>> {
         .collect())
 }
 
+/// An avatar item: something worn, owned, or for sale.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Item {
+    pub id: u64,
+    pub name: String,
+    /// Roblox's type name, for example "Hat" or "Shirt". "Bundle" for bundles.
+    pub kind: String,
+    pub image_url: Option<String>,
+    /// Robux price in the catalog; `None` when not for sale or not a catalog listing.
+    pub price: Option<u64>,
+    pub creator: Option<String>,
+    pub description: Option<String>,
+    /// One of the accessory types that Roblox's "Advanced" box accepts by id.
+    pub accessory: bool,
+    /// Layer order and fit for layered clothing; passed back unchanged when worn.
+    #[serde(skip)]
+    pub meta: Option<serde_json::Value>,
+}
+
+impl Item {
+    fn basic(id: u64, name: String, kind: String) -> Self {
+        let accessory = is_accessory(&kind);
+        Item { id, name, kind, image_url: None, price: None, creator: None, description: None, accessory, meta: None }
+    }
+}
+
+/// Accessories are the items Roblox's "Advanced" box takes by id (up to ten in total).
+pub fn is_accessory(kind: &str) -> bool {
+    kind == "Hat" || kind.ends_with("Accessory")
+}
+
+pub const MAX_ADVANCED_ACCESSORIES: usize = 10;
+
+/// What the account is wearing right now, plus the raw avatar (colours, scale, rig) for saving as an outfit.
+pub fn current_avatar(body: &str) -> Result<(Vec<Item>, serde_json::Value)> {
+    let raw: serde_json::Value = serde_json::from_str(body).map_err(|e| bad("avatar", e))?;
+    let assets = raw.get("assets").and_then(|a| a.as_array()).ok_or_else(|| bad("avatar", "no assets"))?;
+    let items = assets
+        .iter()
+        .filter_map(|a| {
+            let mut item = Item::basic(
+                a.get("id")?.as_u64()?,
+                a.get("name").and_then(|n| n.as_str()).unwrap_or("Item").to_owned(),
+                a.get("assetType").and_then(|t| t.get("name")).and_then(|n| n.as_str()).unwrap_or("Item").to_owned(),
+            );
+            item.meta = a.get("meta").filter(|m| m.is_object()).cloned();
+            Some(item)
+        })
+        .collect();
+    Ok((items, raw))
+}
+
+/// One page of the account's own items, and the cursor for the next page.
+pub fn inventory(body: &str) -> Result<(Vec<Item>, Option<String>)> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Raw {
+        asset_id: u64,
+        name: Option<String>,
+        asset_type: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Body {
+        next_page_cursor: Option<String>,
+        data: Vec<Raw>,
+    }
+    let page: Body = serde_json::from_str(body).map_err(|e| bad("inventory", e))?;
+    let items = page
+        .data
+        .into_iter()
+        .map(|r| Item::basic(r.asset_id, r.name.unwrap_or_else(|| "Item".into()), r.asset_type.unwrap_or_else(|| "Item".into())))
+        .collect();
+    Ok((items, page.next_page_cursor.filter(|c| !c.is_empty())))
+}
+
+/// One page of catalog search results, and the cursor for the next page.
+pub fn catalog(body: &str) -> Result<(Vec<Item>, Option<String>)> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Raw {
+        id: u64,
+        item_type: Option<String>,
+        name: Option<String>,
+        description: Option<String>,
+        creator_name: Option<String>,
+        price: Option<u64>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Body {
+        next_page_cursor: Option<String>,
+        data: Vec<Raw>,
+    }
+    let page: Body = serde_json::from_str(body).map_err(|e| bad("catalog", e))?;
+    let items = page
+        .data
+        .into_iter()
+        .map(|r| Item {
+            id: r.id,
+            name: r.name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Item".into()),
+            kind: r.item_type.unwrap_or_else(|| "Asset".into()),
+            image_url: None,
+            price: r.price,
+            creator: r.creator_name.filter(|c| !c.is_empty()),
+            description: r.description.filter(|d| !d.trim().is_empty()),
+            accessory: false,
+            meta: None,
+        })
+        .collect();
+    Ok((items, page.next_page_cursor.filter(|c| !c.is_empty())))
+}
+
+/// The body for "wear exactly these items". Items already worn keep their layering details.
+pub fn wearing_body(ids: &[u64], worn: &[Item]) -> serde_json::Value {
+    let assets: Vec<serde_json::Value> = ids
+        .iter()
+        .map(|id| {
+            let mut asset = serde_json::json!({ "id": id });
+            if let Some(meta) = worn.iter().find(|w| w.id == *id).and_then(|w| w.meta.clone()) {
+                asset["meta"] = meta;
+            }
+            asset
+        })
+        .collect();
+    serde_json::json!({ "assets": assets })
+}
+
+/// The full list to wear when the Advanced box is saved: everything worn that isn't an accessory,
+/// plus exactly the accessory ids the user entered.
+pub fn with_accessories(worn: &[Item], accessory_ids: &[u64]) -> Vec<u64> {
+    let mut ids: Vec<u64> = worn.iter().filter(|i| !i.accessory).map(|i| i.id).collect();
+    for id in accessory_ids {
+        if *id > 0 && !ids.contains(id) {
+            ids.push(*id);
+        }
+    }
+    ids
+}
+
+/// Ids Roblox refused to put on (not owned, not wearable, or over a limit).
+pub fn refused_ids(body: &str) -> Vec<u64> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else { return vec![] };
+    let mut ids: Vec<u64> = v.get("invalidAssetIds").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|x| x.as_u64()).collect();
+    ids.extend(v.get("invalidAssets").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|x| x.get("id")?.as_u64()));
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// The body for "save what I'm wearing as an outfit", built from the current avatar.
+pub fn outfit_body(name: &str, avatar: &serde_json::Value) -> serde_json::Value {
+    let assets: Vec<serde_json::Value> = avatar
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|a| {
+            let mut asset = serde_json::json!({ "id": a.get("id")?.as_u64()? });
+            if let Some(meta) = a.get("meta").filter(|m| m.is_object()) {
+                asset["meta"] = meta.clone();
+            }
+            Some(asset)
+        })
+        .collect();
+    serde_json::json!({
+        "name": name,
+        "bodyColor3s": avatar.get("bodyColor3s"),
+        "assets": assets,
+        "scale": avatar.get("scales"),
+        "playerAvatarType": avatar.get("playerAvatarType"),
+        "outfitType": "Avatar",
+    })
+}
+
 /// How the signed-in account stands with a game.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -604,6 +780,68 @@ mod tests {
     fn finds_the_continue_row() {
         assert_eq!(continue_universe_ids(OMNI).unwrap(), vec![6035872082, 994732206]);
         assert!(continue_universe_ids(r#"{"sorts":[]}"#).unwrap().is_empty());
+    }
+
+    const AVATAR: &str = r#"{"scales":{"height":1.0},"playerAvatarType":"R15","bodyColor3s":{"headColor3":"FFCC99"},
+        "assets":[{"id":11,"name":"Cap","assetType":{"id":8,"name":"Hat"},"currentVersionId":1},
+                  {"id":12,"name":"Shirt","assetType":{"id":11,"name":"Shirt"},"currentVersionId":2},
+                  {"id":13,"name":"Jacket","assetType":{"id":67,"name":"JacketAccessory"},"meta":{"order":11,"version":1}}]}"#;
+
+    #[test]
+    fn reads_what_the_avatar_is_wearing() {
+        let (items, raw) = current_avatar(AVATAR).unwrap();
+        assert_eq!(items.iter().map(|i| (i.id, i.kind.as_str())).collect::<Vec<_>>(), vec![(11, "Hat"), (12, "Shirt"), (13, "JacketAccessory")]);
+        assert!(items[2].meta.is_some() && items[0].meta.is_none());
+        assert_eq!(raw["playerAvatarType"], "R15");
+        assert!(is_accessory("Hat") && is_accessory("HairAccessory") && !is_accessory("Shirt") && !is_accessory("DynamicHead"));
+    }
+
+    #[test]
+    fn wearing_keeps_layering_for_items_already_on() {
+        let (worn, _) = current_avatar(AVATAR).unwrap();
+        let body = wearing_body(&[12, 13, 99], &worn);
+        assert_eq!(body, serde_json::json!({"assets":[{"id":12},{"id":13,"meta":{"order":11,"version":1}},{"id":99}]}));
+    }
+
+    #[test]
+    fn advanced_replaces_accessories_and_keeps_everything_else() {
+        let (worn, _) = current_avatar(AVATAR).unwrap();
+        assert!(worn[0].accessory && !worn[1].accessory && worn[2].accessory);
+        // Cap (11) and Jacket (13) are accessories; the shirt (12) stays whatever is entered.
+        assert_eq!(with_accessories(&worn, &[13, 77, 0, 77]), vec![12, 13, 77]);
+        assert_eq!(with_accessories(&worn, &[]), vec![12]);
+        assert_eq!(MAX_ADVANCED_ACCESSORIES, 10);
+    }
+
+    #[test]
+    fn reports_items_roblox_refused() {
+        assert_eq!(refused_ids(r#"{"invalidAssets":[{"id":5,"name":"x"}],"invalidAssetIds":[9,5],"success":false}"#), vec![5, 9]);
+        assert!(refused_ids(r#"{"invalidAssets":[],"invalidAssetIds":[],"success":true}"#).is_empty());
+        assert!(refused_ids("not json").is_empty());
+    }
+
+    #[test]
+    fn an_outfit_is_saved_from_the_current_look() {
+        let (_, raw) = current_avatar(AVATAR).unwrap();
+        let body = outfit_body("Winter", &raw);
+        assert_eq!(body["name"], "Winter");
+        assert_eq!(body["assets"].as_array().unwrap().len(), 3);
+        assert_eq!(body["assets"][2]["meta"]["order"], 11);
+        assert_eq!(body["scale"]["height"], 1.0);
+        assert_eq!(body["playerAvatarType"], "R15");
+    }
+
+    #[test]
+    fn parses_inventory_and_catalog_pages() {
+        // Field names captured live on 2026-11-12.
+        let (items, next) = inventory(r#"{"previousPageCursor":null,"nextPageCursor":"abc","data":[{"assetId":7,"name":"Bow","assetType":"HairAccessory","created":"2024"}]}"#).unwrap();
+        assert_eq!((items[0].id, items[0].kind.as_str(), next.as_deref()), (7, "HairAccessory", Some("abc")));
+        let (found, next) = catalog(r#"{"keyword":"cat","nextPageCursor":null,"data":[
+            {"id":1,"itemType":"Asset","assetType":8,"name":"Cat Ears","description":"meow","creatorName":"UGC","price":40},
+            {"id":2,"itemType":"Bundle","name":"","description":"","creatorName":""}]}"#).unwrap();
+        assert_eq!(next, None);
+        assert_eq!((found[0].price, found[0].creator.as_deref(), found[0].description.as_deref()), (Some(40), Some("UGC"), Some("meow")));
+        assert_eq!((found[1].name.as_str(), found[1].kind.as_str(), found[1].price), ("Item", "Bundle", None));
     }
 
     #[test]

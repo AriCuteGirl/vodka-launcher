@@ -3,7 +3,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Chart, Game, GameStanding, Outfit, Person, Presence, PrivateServer, Server, User};
+pub use parse::{Chart, Game, GameStanding, Item, Outfit, Person, Presence, PrivateServer, Server, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -234,6 +234,96 @@ impl Client {
         Ok(())
     }
 
+    /// Pictures for items by id. `bundles` switches to the bundle picture endpoint.
+    async fn item_pictures(&self, ids: &[u64], bundles: bool) -> HashMap<u64, String> {
+        let mut all = HashMap::new();
+        for batch in ids.chunks(ICON_BATCH) {
+            let url = if bundles {
+                format!("https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds={}&size=150x150&format=Png", join_ids(batch))
+            } else {
+                format!("https://thumbnails.roblox.com/v1/assets?assetIds={}&size=150x150&format=Png", join_ids(batch))
+            };
+            if let Ok(body) = self.get(&url, None, THUMB_TTL).await {
+                all.extend(parse::thumbnails(&body).unwrap_or_default());
+            }
+        }
+        all
+    }
+
+    async fn with_pictures(&self, mut items: Vec<Item>) -> Vec<Item> {
+        let assets: Vec<u64> = items.iter().filter(|i| i.kind != "Bundle").map(|i| i.id).collect();
+        let bundles: Vec<u64> = items.iter().filter(|i| i.kind == "Bundle").map(|i| i.id).collect();
+        let asset_pictures = self.item_pictures(&assets, false).await;
+        let bundle_pictures = if bundles.is_empty() { HashMap::new() } else { self.item_pictures(&bundles, true).await };
+        for item in &mut items {
+            let from = if item.kind == "Bundle" { &bundle_pictures } else { &asset_pictures };
+            item.image_url = from.get(&item.id).cloned();
+        }
+        items
+    }
+
+    /// What the account is wearing right now (with pictures) and the raw avatar.
+    pub async fn wearing(&self, cookie: &str) -> Result<(Vec<Item>, serde_json::Value)> {
+        let body = self.send("https://avatar.roblox.com/v2/avatar/avatar", None, Some(cookie)).await?;
+        let (items, raw) = parse::current_avatar(&body)?;
+        Ok((self.with_pictures(items).await, raw))
+    }
+
+    /// One page of the account's own items of the given Roblox types.
+    pub async fn inventory(&self, cookie: &str, user_id: u64, types: &str, cursor: Option<&str>) -> Result<(Vec<Item>, Option<String>)> {
+        let mut url = Url::parse(&format!("https://inventory.roblox.com/v2/users/{user_id}/inventory")).map_err(|_| AppError::BlockedUrl)?;
+        url.query_pairs_mut().append_pair("assetTypes", types).append_pair("limit", "50").append_pair("sortOrder", "Desc");
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        let (items, next) = parse::inventory(&self.get(url.as_str(), Some(cookie), LIST_TTL).await?)?;
+        Ok((self.with_pictures(items).await, next))
+    }
+
+    /// Wears exactly `ids`. Returns the ids Roblox refused. Only ever called from a button the user pressed.
+    pub async fn set_wearing(&self, cookie: &str, ids: &[u64]) -> Result<Vec<u64>> {
+        let now = self.send("https://avatar.roblox.com/v2/avatar/avatar", None, Some(cookie)).await?;
+        let (worn, _) = parse::current_avatar(&now)?;
+        let body = parse::wearing_body(ids, &worn);
+        let answer = self.send("https://avatar.roblox.com/v2/avatar/set-wearing-assets", Some(&body), Some(cookie)).await?;
+        Ok(parse::refused_ids(&answer))
+    }
+
+    /// Replaces the worn accessories with exactly `accessory_ids` (Roblox's "Advanced" box), keeping
+    /// clothes and body parts. Returns the ids Roblox refused.
+    pub async fn set_accessories(&self, cookie: &str, accessory_ids: &[u64]) -> Result<Vec<u64>> {
+        let now = self.send("https://avatar.roblox.com/v2/avatar/avatar", None, Some(cookie)).await?;
+        let (worn, _) = parse::current_avatar(&now)?;
+        let ids = parse::with_accessories(&worn, accessory_ids);
+        let body = parse::wearing_body(&ids, &worn);
+        let answer = self.send("https://avatar.roblox.com/v2/avatar/set-wearing-assets", Some(&body), Some(cookie)).await?;
+        Ok(parse::refused_ids(&answer))
+    }
+
+    /// Saves the current look as a new outfit. Only ever called from a button the user pressed.
+    pub async fn save_outfit(&self, cookie: &str, name: &str) -> Result<()> {
+        let now = self.send("https://avatar.roblox.com/v2/avatar/avatar", None, Some(cookie)).await?;
+        let (_, raw) = parse::current_avatar(&now)?;
+        self.send("https://avatar.roblox.com/v3/outfits/create", Some(&parse::outfit_body(name, &raw)), Some(cookie)).await.map(|_| ())
+    }
+
+    /// Searches the avatar catalog. Public, no session needed.
+    pub async fn catalog(&self, keyword: &str, category: u32, sort: u32, cursor: Option<&str>) -> Result<(Vec<Item>, Option<String>)> {
+        let mut url = Url::parse("https://catalog.roblox.com/v1/search/items/details").map_err(|_| AppError::BlockedUrl)?;
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("Category", &category.to_string()).append_pair("SortType", &sort.to_string()).append_pair("Limit", "30");
+            if !keyword.trim().is_empty() {
+                q.append_pair("Keyword", keyword.trim());
+            }
+            if let Some(c) = cursor {
+                q.append_pair("Cursor", c);
+            }
+        }
+        let (items, next) = parse::catalog(&self.get(url.as_str(), None, CHARTS_TTL).await?)?;
+        Ok((self.with_pictures(items).await, next))
+    }
+
     /// Whether this account favorited and how it rated a game, plus the game's public vote counts.
     pub async fn game_standing(&self, cookie: &str, universe_id: u64) -> Result<GameStanding> {
         let base = format!("https://games.roblox.com/v1/games/{universe_id}");
@@ -448,6 +538,15 @@ mod tests {
         assert!(!servers.is_empty());
         assert!(servers.windows(2).all(|w| w[0].playing <= w[1].playing));
         assert!(servers.iter().all(|s| s.max_players > 0 && s.playing < s.max_players));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_catalog_search_finds_items_with_pictures() {
+        let (items, next) = Client::new().catalog("cat", 11, 0, None).await.unwrap();
+        assert!(items.len() > 5);
+        assert!(next.is_some());
+        assert!(items.iter().filter(|i| i.image_url.is_some()).count() > 3);
     }
 
     #[tokio::test]

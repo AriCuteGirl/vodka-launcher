@@ -130,6 +130,7 @@ input {
 
 a {
   color: var(--frost);
+  text-underline-offset: 3px;
 }
 
 code,

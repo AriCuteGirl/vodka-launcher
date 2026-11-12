@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { Account, AppError, AvatarView, Chart, GameStanding, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -52,6 +52,13 @@ export const api = {
   avatar: () => call<AvatarView>("avatar"),
   avatarPicture: () => call<string | null>("avatar_picture"),
   wearOutfit: (outfitId: number) => call<string[]>("wear_outfit", { outfitId }),
+  avatarWearing: () => call<Item[]>("avatar_wearing"),
+  avatarInventory: (tab: string, cursor: string | null = null) => call<ItemPage>("avatar_inventory", { tab, cursor }),
+  avatarSetItems: (assetIds: number[]) => call<number[]>("avatar_set_items", { assetIds }),
+  avatarSetAccessories: (assetIds: number[]) => call<number[]>("avatar_set_accessories", { assetIds }),
+  avatarSaveOutfit: (name: string) => call<void>("avatar_save_outfit", { name }),
+  catalogSearch: (keyword: string, category: number, sort: number, cursor: string | null = null) =>
+    call<ItemPage>("catalog_search", { keyword, category, sort, cursor }),
   headshots: (userIds: number[]) => call<Record<string, string>>("headshots", { userIds }),
   listInstances: () => call<Instance[]>("list_instances"),
   stopInstance: (id: number, restart: boolean) => call<void>("stop_instance", { id, restart }),

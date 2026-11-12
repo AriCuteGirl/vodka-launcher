@@ -111,6 +111,25 @@ export interface PartySync {
   events: PartyEvent[];
 }
 
+/** An avatar item: worn, owned, or for sale. */
+export interface Item {
+  id: number;
+  name: string;
+  /** Roblox's type name ("Hat", "Shirt", …), or "Bundle". */
+  kind: string;
+  imageUrl: string | null;
+  price: number | null;
+  creator: string | null;
+  description: string | null;
+  /** One of the accessory types the Advanced box takes by id. */
+  accessory: boolean;
+}
+
+export interface ItemPage {
+  items: Item[];
+  next: string | null;
+}
+
 export interface GameStanding {
   favorited: boolean;
   /** true liked, false disliked, null not rated. */

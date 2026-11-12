@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import { NO_OPTIONS, type Account, type AppError, type ChatContact, type ChatMessage, type GameStanding, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, type Account, type AppError, type ChatContact, type ChatMessage, type GameStanding, type Item, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -108,6 +108,11 @@ let chatMessages: ChatMessage[] = [
   { id: 2, sender: 1, recipient: 301, kind: "text", body: "yeah give me a sec", payload: null, createdAt: new Date(Date.now() - 540_000).toISOString() },
   { id: 3, sender: 301, recipient: 1, kind: "invite", body: "", payload: { game: DEMO_GAMES[0], placeId: 17625359962, gameId: "0f0e-11" }, createdAt: new Date(Date.now() - 60_000).toISOString() },
 ];
+const item = (id: number, name: string, kind: string, price: number | null = null): Item => ({
+  id, name, kind, imageUrl: null, price, creator: price == null ? null : "Frost UGC", description: price == null ? null : "A demo item.", accessory: kind === "Hat" || kind.endsWith("Accessory"),
+});
+let demoWorn: Item[] = [item(11, "Snow Cap", "Hat"), item(12, "Ice Shades", "FaceAccessory"), item(13, "Black Hoodie", "Shirt"), item(14, "Jeans", "Pants"), item(15, "Torso", "Torso")];
+const demoOwned: Item[] = [item(11, "Snow Cap", "Hat"), item(12, "Ice Shades", "FaceAccessory"), item(21, "Cat Ears", "HairAccessory"), item(22, "Frost Scarf", "NeckAccessory"), item(23, "Wings", "BackAccessory")];
 const demoStanding: Record<string, GameStanding> = {};
 const standing = (id: unknown) => (demoStanding[String(id)] ??= { favorited: false, vote: null, canVote: Number(id) % 2 === 0, whyNot: Number(id) % 2 === 0 ? null : "Play this game first, then you can rate it.", upVotes: 10984750, downVotes: 746771 });
 let demoParty: Party | null = null;
@@ -386,6 +391,35 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return [];
     case "headshots":
       return {};
+    case "avatar_wearing":
+      await wait(250);
+      return demoWorn;
+    case "avatar_inventory":
+      await wait(300);
+      return { items: args.tab === "accessories" ? demoOwned : [item(13, "Black Hoodie", "Shirt"), item(31, "Pink Hoodie", "Shirt")], next: null };
+    case "avatar_set_items": {
+      const ids = args.assetIds as number[];
+      const all = [...demoWorn, ...demoOwned, item(31, "Pink Hoodie", "Shirt")];
+      demoWorn = ids.map((id) => all.find((x) => x.id === id)).filter((x): x is Item => !!x);
+      return ids.filter((id) => !all.some((x) => x.id === id));
+    }
+    case "avatar_set_accessories": {
+      const ids = args.assetIds as number[];
+      const known = ids.map((id) => demoOwned.find((x) => x.id === id)).filter((x): x is Item => !!x);
+      demoWorn = [...demoWorn.filter((x) => !x.accessory), ...known];
+      return ids.filter((id) => !demoOwned.some((x) => x.id === id));
+    }
+    case "avatar_save_outfit":
+      await wait(400);
+      return null;
+    case "catalog_search": {
+      await wait(400);
+      if (s in ERRORS) throw ERRORS[s];
+      const names = ["Cat Ears", "Frost Crown", "Ice Wings", "Snow Scarf", "Glacier Shades", "Polar Tail", "Winter Beanie", "Crystal Horns"];
+      const q = String(args.keyword).toLowerCase();
+      const found = names.filter((n) => n.toLowerCase().includes(q)).map((n, i) => item(100 + i, n, "Asset", 40 + i * 15));
+      return { items: s === "empty" ? [] : found, next: null };
+    }
     case "list_instances":
       return instances.map((i) => ({
         ...i,

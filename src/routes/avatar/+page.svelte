@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import AvatarEditor from "$lib/components/AvatarEditor.svelte";
   import Button from "$lib/components/Button.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import Skeleton from "$lib/components/Skeleton.svelte";
@@ -13,6 +14,26 @@
   let wearing = $state<number | null>(null);
   let lastWorn = $state<number | null>(null);
   let filter = $state("");
+  let tab = $state<"outfits" | "wearing" | "items" | "advanced">("outfits");
+  const TABS = [
+    { key: "outfits", label: "Outfits" },
+    { key: "wearing", label: "Wearing" },
+    { key: "items", label: "My items" },
+    { key: "advanced", label: "Advanced" },
+  ] as const;
+
+  /** After the editor changed the look: redraw the picture once Roblox has, and refresh outfits. */
+  function changed() {
+    for (const delay of [2500, 6000]) {
+      setTimeout(async () => {
+        try {
+          picture = (await api.avatarPicture()) ?? picture;
+        } catch {
+          // The old picture stays; Refresh is there.
+        }
+      }, delay);
+    }
+  }
 
   async function load() {
     view = { status: "loading" };
@@ -64,7 +85,7 @@
   <header>
     <div>
       <h1>Avatar</h1>
-      <p class="muted">Switch between your saved Roblox outfits. Making or editing outfits still happens on roblox.com.</p>
+      <p class="muted">Switch outfits, put items on and off, save a look as an outfit, or set accessories by item ID.</p>
     </div>
   </header>
 
@@ -98,6 +119,14 @@
       </section>
 
       <section class="outfits">
+        <div class="tabs" role="tablist" aria-label="Avatar editor">
+          {#each TABS as t (t.key)}
+            <button role="tab" aria-selected={tab === t.key} onclick={() => ((tab = t.key), t.key === "outfits" && void load())}>{t.label}</button>
+          {/each}
+        </div>
+        {#if tab !== "outfits"}
+          <AvatarEditor {tab} onchanged={changed} />
+        {:else}
         <div class="bar">
           <h2>Saved outfits {#if view.status === "ready"}<span class="count">{view.data.outfits.length}</span>{/if}</h2>
           {#if view.status === "ready" && view.data.outfits.length > 8}
@@ -149,6 +178,7 @@
               </li>
             {/each}
           </ul>
+        {/if}
         {/if}
       </section>
     </div>
@@ -203,6 +233,33 @@
     display: grid;
     gap: var(--s-3);
     min-width: 0;
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    width: fit-content;
+    border-radius: var(--r-md);
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--line);
+  }
+  .tabs button {
+    padding: 6px 14px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .tabs button:hover {
+    color: var(--text-0);
+  }
+  .tabs button[aria-selected="true"] {
+    background: var(--glass-strong);
+    color: var(--frost);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
   }
   .bar {
     display: flex;

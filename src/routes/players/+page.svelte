@@ -216,6 +216,27 @@
   .selection b {
     color: var(--text-0);
   }
+  /* The page links in the bar are buttons, not underlined text. */
+  .selection a {
+    display: inline-flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 var(--s-3);
+    border-radius: var(--r-sm);
+    border: 1px solid var(--line);
+    background: var(--glass);
+    color: var(--text-0);
+    font-size: var(--fs-sm);
+    font-weight: 560;
+    text-decoration: none;
+    transition:
+      background var(--fast) var(--ease),
+      border-color var(--fast) var(--ease);
+  }
+  .selection a:hover {
+    background: var(--glass-hover);
+    border-color: var(--line-strong);
+  }
   .hint {
     font-size: var(--fs-sm);
   }

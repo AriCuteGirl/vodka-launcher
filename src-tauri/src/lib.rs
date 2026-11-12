@@ -10,7 +10,7 @@ mod tweaks;
 use error::{AppError, Result};
 use instances::{InstanceView, SharedManager};
 use mocktail::detect::MocktailStatus;
-use roblox_api::{Chart, Game, GameStanding, Outfit, Person, Presence, User};
+use roblox_api::{Chart, Game, GameStanding, Item, Outfit, Person, Presence, User};
 use serde::{Deserialize, Serialize};
 use settings::{SavedAccount, Settings};
 use std::path::PathBuf;
@@ -434,6 +434,88 @@ async fn avatar(app: AppHandle, state: State<'_, AppState>) -> Result<AvatarView
     Ok(AvatarView { picture_url, outfits })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ItemPage {
+    items: Vec<Item>,
+    next: Option<String>,
+}
+
+/// Which of the account's own items a tab of the avatar editor lists: its key and Roblox's type names.
+const INVENTORY_TABS: [(&str, &str); 6] = [
+    ("accessories", "Hat,HairAccessory,FaceAccessory,NeckAccessory,ShoulderAccessory,FrontAccessory,BackAccessory,WaistAccessory"),
+    ("shirts", "Shirt"),
+    ("pants", "Pants"),
+    ("tshirts", "TShirt"),
+    ("faces", "Face"),
+    ("gear", "Gear"),
+];
+
+/// What the active account is wearing right now.
+#[tauri::command]
+async fn avatar_wearing(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Item>> {
+    let (_, cookie) = active_cookie(&app).await?;
+    Ok(state.api.wearing(&cookie).await?.0)
+}
+
+/// One page of the active account's own items in an editor tab.
+#[tauri::command]
+async fn avatar_inventory(app: AppHandle, state: State<'_, AppState>, tab: String, cursor: Option<String>) -> Result<ItemPage> {
+    let types = INVENTORY_TABS.iter().find(|(key, _)| *key == tab).map(|(_, types)| *types);
+    let types = types.ok_or_else(|| AppError::Other("Vodka doesn't know that kind of item.".into()))?;
+    let (account, cookie) = active_cookie(&app).await?;
+    let (items, next) = state.api.inventory(&cookie, account.id, types, cursor.as_deref()).await?;
+    Ok(ItemPage { items, next })
+}
+
+/// Makes the active account wear exactly these items. Returns the ids Roblox refused.
+#[tauri::command]
+async fn avatar_set_items(app: AppHandle, state: State<'_, AppState>, asset_ids: Vec<u64>) -> Result<Vec<u64>> {
+    if asset_ids.len() > 80 {
+        return Err(AppError::Other("That's more items than an avatar can wear.".into()));
+    }
+    let mut ids = asset_ids;
+    ids.retain(|id| *id > 0);
+    let mut seen = std::collections::HashSet::new();
+    ids.retain(|id| seen.insert(*id));
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.set_wearing(&cookie, &ids).await
+}
+
+/// Roblox's "Advanced" box: wear exactly these accessories (up to ten), by item id.
+#[tauri::command]
+async fn avatar_set_accessories(app: AppHandle, state: State<'_, AppState>, asset_ids: Vec<u64>) -> Result<Vec<u64>> {
+    if asset_ids.len() > roblox_api::parse::MAX_ADVANCED_ACCESSORIES {
+        return Err(AppError::Other(format!("Roblox allows up to {} accessories this way.", roblox_api::parse::MAX_ADVANCED_ACCESSORIES)));
+    }
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.set_accessories(&cookie, &asset_ids).await
+}
+
+/// Saves the active account's current look as a new outfit.
+#[tauri::command]
+async fn avatar_save_outfit(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<()> {
+    let name = name.trim().to_owned();
+    if name.is_empty() || name.chars().count() > 25 {
+        return Err(AppError::Other("Give the outfit a name of 1 to 25 characters.".into()));
+    }
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.save_outfit(&cookie, &name).await
+}
+
+/// Searches the avatar catalog. Works signed out.
+#[tauri::command]
+async fn catalog_search(state: State<'_, AppState>, keyword: String, category: u32, sort: u32, cursor: Option<String>) -> Result<ItemPage> {
+    if keyword.chars().count() > 100 {
+        return Err(AppError::Other("That search is too long.".into()));
+    }
+    if ![1, 3, 4, 11, 12].contains(&category) || sort > 5 {
+        return Err(AppError::Other("Vodka doesn't know that catalog filter.".into()));
+    }
+    let (items, next) = state.api.catalog(&keyword, category, sort, cursor.as_deref()).await?;
+    Ok(ItemPage { items, next })
+}
+
 /// Profile pictures for any Roblox users (public data), keyed by user id.
 #[tauri::command]
 async fn headshots(state: State<'_, AppState>, user_ids: Vec<u64>) -> Result<std::collections::HashMap<u64, String>> {
@@ -714,6 +796,12 @@ pub fn run() {
             set_vote,
             avatar,
             avatar_picture,
+            avatar_wearing,
+            avatar_inventory,
+            avatar_set_items,
+            avatar_set_accessories,
+            avatar_save_outfit,
+            catalog_search,
             headshots,
             wear_outfit,
             stop_instance,
