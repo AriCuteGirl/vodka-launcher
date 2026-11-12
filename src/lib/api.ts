@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { Account, AppError, AvatarView, Chart, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, AvatarView, Chart, GameStanding, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -45,6 +45,9 @@ export const api = {
   listFriendRequests: () => call<Person[]>("list_friend_requests"),
   answerFriendRequest: (userId: number, accept: boolean) => call<void>("answer_friend_request", { userId, accept }),
   joinFriend: (userId: number) => call<number>("join_friend", { userId }),
+  gameStanding: (universeId: number) => call<GameStanding>("game_standing", { universeId }),
+  setFavorite: (universeId: number, favorited: boolean) => call<GameStanding>("set_favorite", { universeId, favorited }),
+  setVote: (universeId: number, like: boolean) => call<GameStanding>("set_vote", { universeId, like }),
   refreshInstanceGames: () => call<boolean>("refresh_instance_games"),
   avatar: () => call<AvatarView>("avatar"),
   avatarPicture: () => call<string | null>("avatar_picture"),

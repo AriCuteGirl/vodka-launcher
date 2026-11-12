@@ -1,7 +1,8 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { app, launchMany } from "$lib/state.svelte";
-  import { toAppError, type Loadable, type ServerLists, type Target } from "$lib/types";
+  import { compact } from "$lib/format";
+  import { app, launchMany, loadHome, toast } from "$lib/state.svelte";
+  import { toAppError, type GameStanding, type Loadable, type ServerLists, type Target } from "$lib/types";
   import Avatar from "./Avatar.svelte";
   import Button from "./Button.svelte";
   import Icon from "./Icon.svelte";
@@ -27,6 +28,32 @@
     }
   }
   if (!fixedTarget) void loadServers();
+
+  // Favorite and like, for the active account.
+  let standing = $state<GameStanding | null>(null);
+  let standingBusy = $state(false);
+  void api.gameStanding(game.universeId).then((s) => (standing = s)).catch(() => {});
+  const likeShare = $derived(
+    standing?.upVotes != null && standing.downVotes != null && standing.upVotes + standing.downVotes > 0
+      ? Math.round((standing.upVotes / (standing.upVotes + standing.downVotes)) * 100)
+      : null,
+  );
+
+  async function change(run: () => Promise<GameStanding>, done: string) {
+    if (standingBusy) return;
+    standingBusy = true;
+    try {
+      standing = await run();
+      toast(done, "ok");
+    } catch (e) {
+      toast(toAppError(e).message, "danger");
+    }
+    standingBusy = false;
+  }
+  const toggleFavorite = () =>
+    standing &&
+    change(() => api.setFavorite(game.universeId, !standing!.favorited), standing.favorited ? `Removed ${game.name} from favorites.` : `Added ${game.name} to favorites.`).then(() => void loadHome());
+  const vote = (like: boolean) => change(() => api.setVote(game.universeId, like), like ? `You liked ${game.name}.` : `You disliked ${game.name}.`);
 
   const lists = $derived(servers.status === "ready" ? servers.data : null);
   const emptiest = $derived(lists?.public[0] ?? null);
@@ -54,6 +81,19 @@
 </script>
 
 <Modal title={game.name} onclose={close}>
+  <div class="standing">
+    <button class="pill" class:on={standing?.favorited} disabled={!standing || standingBusy} aria-pressed={standing?.favorited ?? false} onclick={toggleFavorite}>
+      <Icon name="star" size={16} filled={standing?.favorited} />{standing?.favorited ? "Favorited" : "Favorite"}
+    </button>
+    <button class="pill" class:on={standing?.vote === true} disabled={!standing?.canVote || standingBusy} aria-pressed={standing?.vote === true} onclick={() => vote(true)}>
+      <Icon name="thumb" size={16} filled={standing?.vote === true} />Like{#if standing?.upVotes != null}<small>{compact(standing.upVotes)}</small>{/if}
+    </button>
+    <button class="pill down" class:on={standing?.vote === false} disabled={!standing?.canVote || standingBusy} aria-pressed={standing?.vote === false} onclick={() => vote(false)}>
+      <Icon name="thumb" size={16} filled={standing?.vote === false} />Dislike
+    </button>
+    {#if likeShare != null}<span class="faint share">{likeShare}% like it</span>{/if}
+  </div>
+  {#if standing && !standing.canVote && standing.whyNot}<p class="faint whynot">{standing.whyNot}</p>{/if}
   <h3>Accounts</h3>
   <ul class="accounts">
     {#each app.accounts as a (a.id)}
@@ -129,6 +169,58 @@
 </Modal>
 
 <style>
+  .standing {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--line);
+    background: var(--glass);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background var(--fast) var(--ease),
+      border-color var(--fast) var(--ease),
+      color var(--fast) var(--ease);
+  }
+  .pill:hover:not(:disabled) {
+    background: var(--glass-hover);
+    border-color: var(--line-strong);
+  }
+  .pill:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .pill.on {
+    border-color: rgba(164, 222, 255, 0.6);
+    background: var(--glass-strong);
+    color: var(--frost);
+  }
+  .pill.down :global(svg) {
+    transform: rotate(180deg);
+  }
+  .pill small {
+    font-weight: 500;
+  }
+  .share,
+  .whynot {
+    font-size: var(--fs-xs);
+  }
+  .share {
+    margin-left: 4px;
+  }
+  .whynot {
+    margin-top: 6px;
+  }
   h3 {
     margin: var(--s-3) 0 var(--s-2);
     font-size: var(--fs-xs);

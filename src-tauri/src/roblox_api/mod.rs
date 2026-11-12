@@ -3,7 +3,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Chart, Game, Outfit, Person, Presence, PrivateServer, Server, User};
+pub use parse::{Chart, Game, GameStanding, Outfit, Person, Presence, PrivateServer, Server, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -63,12 +63,18 @@ impl Client {
     }
 
     async fn send(&self, url: &str, body: Option<&serde_json::Value>, cookie: Option<&str>) -> Result<String> {
+        self.request(false, url, body, cookie).await
+    }
+
+    /// GET without a body, POST with one, or PATCH with one when `patch` is set.
+    async fn request(&self, patch: bool, url: &str, body: Option<&serde_json::Value>, cookie: Option<&str>) -> Result<String> {
         let parsed = Url::parse(url).map_err(|_| AppError::BlockedUrl)?;
         check_url(&parsed)?;
         let mut csrf: Option<String> = None;
         let mut attempt = 0;
         loop {
             let mut req = match body {
+                Some(json) if patch => self.http.patch(parsed.clone()).json(json),
                 Some(json) => self.http.post(parsed.clone()).json(json),
                 None => self.http.get(parsed.clone()),
             }
@@ -225,6 +231,33 @@ impl Client {
         self.send(&url, Some(&serde_json::json!({})), Some(cookie)).await?;
         // The friends list just changed.
         self.cache.lock().unwrap().retain(|key, _| !key.contains("/friends"));
+        Ok(())
+    }
+
+    /// Whether this account favorited and how it rated a game, plus the game's public vote counts.
+    pub async fn game_standing(&self, cookie: &str, universe_id: u64) -> Result<GameStanding> {
+        let base = format!("https://games.roblox.com/v1/games/{universe_id}");
+        let favorite = self.send(&format!("{base}/favorites"), None, Some(cookie)).await?;
+        let mine = self.send(&format!("{base}/votes/user"), None, Some(cookie)).await?;
+        // Totals are public and only decoration; show the buttons even without them.
+        let totals = self.get(&format!("{base}/votes"), None, LIST_TTL).await.ok();
+        parse::game_standing(&favorite, &mine, totals.as_deref())
+    }
+
+    /// Adds or removes a game from the account's favorites. Only ever called from a button the user pressed.
+    pub async fn set_favorite(&self, cookie: &str, universe_id: u64, favorited: bool) -> Result<()> {
+        let url = format!("https://games.roblox.com/v1/games/{universe_id}/favorites");
+        self.send(&url, Some(&serde_json::json!({ "isFavorited": favorited })), Some(cookie)).await?;
+        // Home's favorites row just changed.
+        self.cache.lock().unwrap().retain(|key, _| !key.contains("/favorite/games"));
+        Ok(())
+    }
+
+    /// Likes (`true`) or dislikes (`false`) a game. Only ever called from a button the user pressed.
+    pub async fn set_vote(&self, cookie: &str, universe_id: u64, like: bool) -> Result<()> {
+        let url = format!("https://games.roblox.com/v1/games/{universe_id}/user-votes");
+        self.request(true, &url, Some(&serde_json::json!({ "vote": like })), Some(cookie)).await?;
+        self.cache.lock().unwrap().retain(|key, _| !key.ends_with(&format!("/games/{universe_id}/votes")));
         Ok(())
     }
 

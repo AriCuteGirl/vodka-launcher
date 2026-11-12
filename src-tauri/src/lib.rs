@@ -10,7 +10,7 @@ mod tweaks;
 use error::{AppError, Result};
 use instances::{InstanceView, SharedManager};
 use mocktail::detect::MocktailStatus;
-use roblox_api::{Chart, Game, Outfit, Person, Presence, User};
+use roblox_api::{Chart, Game, GameStanding, Outfit, Person, Presence, User};
 use serde::{Deserialize, Serialize};
 use settings::{SavedAccount, Settings};
 use std::path::PathBuf;
@@ -398,6 +398,26 @@ async fn refresh_instance_games(app: AppHandle, state: State<'_, AppState>) -> R
     Ok(changed)
 }
 
+/// Whether the active account favorited and rated a game.
+#[tauri::command]
+async fn game_standing(app: AppHandle, state: State<'_, AppState>, universe_id: u64) -> Result<GameStanding> {
+    state.api.game_standing(&active_cookie(&app).await?.1, universe_id).await
+}
+
+#[tauri::command]
+async fn set_favorite(app: AppHandle, state: State<'_, AppState>, universe_id: u64, favorited: bool) -> Result<GameStanding> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.set_favorite(&cookie, universe_id, favorited).await?;
+    state.api.game_standing(&cookie, universe_id).await
+}
+
+#[tauri::command]
+async fn set_vote(app: AppHandle, state: State<'_, AppState>, universe_id: u64, like: bool) -> Result<GameStanding> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.set_vote(&cookie, universe_id, like).await?;
+    state.api.game_standing(&cookie, universe_id).await
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AvatarView {
@@ -689,6 +709,9 @@ pub fn run() {
             list_servers,
             list_instances,
             refresh_instance_games,
+            game_standing,
+            set_favorite,
+            set_vote,
             avatar,
             avatar_picture,
             headshots,

@@ -4,7 +4,6 @@
   import GameRow from "$lib/components/GameRow.svelte";
   import InstallGuide from "$lib/components/InstallGuide.svelte";
   import Logo from "$lib/components/Logo.svelte";
-  import StateCard from "$lib/components/StateCard.svelte";
   import { app, signIn } from "$lib/state.svelte";
 </script>
 
@@ -18,9 +17,6 @@
 
   {#if app.account}
     <Hero />
-    {#if app.mocktail?.running}
-      <StateCard icon="bottle" title="Mocktail is already open">Press Play on any game and Vodka sends it to the open window.</StateCard>
-    {/if}
     <GameRow
       title="Continue playing"
       icon="clock"

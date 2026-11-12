@@ -111,6 +111,16 @@ export interface PartySync {
   events: PartyEvent[];
 }
 
+export interface GameStanding {
+  favorited: boolean;
+  /** true liked, false disliked, null not rated. */
+  vote: boolean | null;
+  canVote: boolean;
+  whyNot: string | null;
+  upVotes: number | null;
+  downVotes: number | null;
+}
+
 export interface Outfit {
   id: number;
   name: string;

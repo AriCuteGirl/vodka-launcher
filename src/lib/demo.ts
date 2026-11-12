@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import { NO_OPTIONS, type Account, type AppError, type ChatContact, type ChatMessage, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, type Account, type AppError, type ChatContact, type ChatMessage, type GameStanding, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -108,6 +108,8 @@ let chatMessages: ChatMessage[] = [
   { id: 2, sender: 1, recipient: 301, kind: "text", body: "yeah give me a sec", payload: null, createdAt: new Date(Date.now() - 540_000).toISOString() },
   { id: 3, sender: 301, recipient: 1, kind: "invite", body: "", payload: { game: DEMO_GAMES[0], placeId: 17625359962, gameId: "0f0e-11" }, createdAt: new Date(Date.now() - 60_000).toISOString() },
 ];
+const demoStanding: Record<string, GameStanding> = {};
+const standing = (id: unknown) => (demoStanding[String(id)] ??= { favorited: false, vote: null, canVote: Number(id) % 2 === 0, whyNot: Number(id) % 2 === 0 ? null : "Play this game first, then you can rate it.", upVotes: 10984750, downVotes: 746771 });
 let demoParty: Party | null = null;
 let demoPartyEvents: PartyEvent[] = [];
 let partyEventId = 0;
@@ -359,6 +361,15 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "chat_delete_account":
       chatOn = false;
       return null;
+    case "game_standing":
+      await wait(250);
+      return { ...standing(args.universeId) };
+    case "set_favorite":
+      standing(args.universeId).favorited = args.favorited as boolean;
+      return { ...standing(args.universeId) };
+    case "set_vote":
+      standing(args.universeId).vote = args.like as boolean;
+      return { ...standing(args.universeId) };
     case "refresh_instance_games":
       return false;
     case "avatar":

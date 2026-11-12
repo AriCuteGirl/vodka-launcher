@@ -5,6 +5,9 @@
 Phase 4 (in progress): social.
 
 - Up to 10 games at once instead of 2: games beyond the second run from their own copy of Mocktail's binary. A five-second reminder shows each time another game is added.
+- Favorite, Like and Dislike buttons in each game's dialog.
+- The party follows its leader into games automatically; members can turn following off.
+- Several Vodka windows can run at once, each on its own account, sharing game slots safely.
 - Parties: up to six Vodka users with a shared chat; the leader can bring everyone into the game they are playing.
 - Avatar page: see your current look and switch between saved outfits.
 - A running game's name and icon follow you when you switch games inside Roblox.

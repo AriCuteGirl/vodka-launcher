@@ -113,6 +113,59 @@ pub fn thumbnails(body: &str) -> Result<HashMap<u64, String>> {
         .collect())
 }
 
+/// How the signed-in account stands with a game.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameStanding {
+    pub favorited: bool,
+    /// `Some(true)` liked, `Some(false)` disliked, `None` not rated.
+    pub vote: Option<bool>,
+    pub can_vote: bool,
+    /// Why rating isn't allowed, in plain words, when it isn't.
+    pub why_not: Option<String>,
+    pub up_votes: Option<u64>,
+    pub down_votes: Option<u64>,
+}
+
+pub fn game_standing(favorite: &str, mine: &str, totals: Option<&str>) -> Result<GameStanding> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Favorite {
+        is_favorited: bool,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Mine {
+        can_vote: bool,
+        user_vote: Option<bool>,
+        reason_for_not_voteable: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Totals {
+        up_votes: Option<u64>,
+        down_votes: Option<u64>,
+    }
+    let favorite: Favorite = serde_json::from_str(favorite).map_err(|e| bad("favorite", e))?;
+    let mine: Mine = serde_json::from_str(mine).map_err(|e| bad("vote", e))?;
+    let totals: Option<Totals> = totals.and_then(|t| serde_json::from_str(t).ok());
+    let why_not = (!mine.can_vote).then(|| match mine.reason_for_not_voteable.as_deref() {
+        Some("PlayGame") => "Play this game first, then you can rate it.".to_owned(),
+        Some("FloodCheckThresholdMet") => "You've rated a lot recently. Try again later.".to_owned(),
+        Some("EmailIsNotVerified") => "Roblox needs a verified email before you can rate games.".to_owned(),
+        Some("AccountNotOldEnough") => "This account is too new to rate games.".to_owned(),
+        _ => "Roblox doesn't let this account rate this game right now.".to_owned(),
+    });
+    Ok(GameStanding {
+        favorited: favorite.is_favorited,
+        vote: mine.user_vote,
+        can_vote: mine.can_vote,
+        why_not,
+        up_votes: totals.as_ref().and_then(|t| t.up_votes),
+        down_votes: totals.as_ref().and_then(|t| t.down_votes),
+    })
+}
+
 /// A saved avatar outfit.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -551,6 +604,25 @@ mod tests {
     fn finds_the_continue_row() {
         assert_eq!(continue_universe_ids(OMNI).unwrap(), vec![6035872082, 994732206]);
         assert!(continue_universe_ids(r#"{"sorts":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn reads_favorite_and_vote_status() {
+        // All three bodies captured live on 2026-11-12.
+        let s = game_standing(
+            r#"{"isFavorited": false}"#,
+            r#"{"canVote": false, "userVote": null, "reasonForNotVoteable": "PlayGame"}"#,
+            Some(r#"{"id": 6035872082, "upVotes": 10984750, "downVotes": 746771}"#),
+        )
+        .unwrap();
+        assert!(!s.favorited && !s.can_vote && s.vote.is_none());
+        assert_eq!(s.why_not.as_deref(), Some("Play this game first, then you can rate it."));
+        assert_eq!((s.up_votes, s.down_votes), (Some(10984750), Some(746771)));
+
+        let liked = game_standing(r#"{"isFavorited":true}"#, r#"{"canVote":true,"userVote":true,"reasonForNotVoteable":""}"#, None).unwrap();
+        assert!(liked.favorited && liked.can_vote);
+        assert_eq!((liked.vote, liked.why_not, liked.up_votes), (Some(true), None, None));
+        assert!(game_standing("{}", "{}", None).is_err());
     }
 
     #[test]
