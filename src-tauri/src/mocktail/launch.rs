@@ -36,6 +36,11 @@ pub fn launch_uri(place_id: u64) -> String {
     format!("roblox://experiences/start?placeId={place_id}")
 }
 
+/// A link into one specific server, for joining a friend. `game_id` must already be validated.
+pub fn join_uri(place_id: u64, game_id: &str) -> String {
+    format!("roblox://experiences/start?placeId={place_id}&gameInstanceId={game_id}")
+}
+
 /// Keeps session cookies out of the log, whatever Mocktail prints.
 pub fn redact(line: &str) -> String {
     const MARKERS: [&str; 2] = [".ROBLOSECURITY", "_|WARNING:-DO-NOT-SHARE-THIS"];
@@ -72,6 +77,11 @@ mod tests {
     #[test]
     fn builds_the_uri_mocktail_parses() {
         assert_eq!(launch_uri(17625359962), "roblox://experiences/start?placeId=17625359962");
+    }
+
+    #[test]
+    fn builds_a_server_link_for_joining_a_friend() {
+        assert_eq!(join_uri(5, "0f0e-11"), "roblox://experiences/start?placeId=5&gameInstanceId=0f0e-11");
     }
 
     #[test]

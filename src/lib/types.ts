@@ -36,6 +36,20 @@ export interface MocktailStatus {
 export interface Presence {
   kind: "offline" | "online" | "in_game" | "studio";
   location: string | null;
+  placeId?: number | null;
+  rootPlaceId?: number | null;
+  universeId?: number | null;
+  /** Present when the server they're on can be joined. */
+  gameId?: string | null;
+}
+
+/** A friend, or someone who sent a friend request. */
+export interface Person {
+  id: number;
+  name: string;
+  displayName: string;
+  avatarUrl: string | null;
+  presence: Presence;
 }
 
 export interface Account {

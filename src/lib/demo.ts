@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import { NO_OPTIONS, type Account, type AppError, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, type Account, type AppError, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -78,6 +78,24 @@ async function games(list: Game[]): Promise<Game[]> {
   // The second account has different games, so switching is visible.
   return active()?.id === 2 ? [...list].reverse().slice(0, 4) : list;
 }
+
+const person = (id: number, displayName: string, kind: Person["presence"]["kind"], location: string | null = null, joinable = false): Person => ({
+  id,
+  name: displayName.toLowerCase().replace(/\W/g, "_"),
+  displayName,
+  avatarUrl: null,
+  presence: { kind, location, placeId: joinable ? 17625359962 : null, universeId: joinable ? 6035872082 : null, gameId: joinable ? "0f0e-11" : null },
+});
+let demoFriends: Person[] = [
+  person(101, "Glacier", "in_game", "RIVALS", true),
+  person(102, "Mint Julep", "in_game", "Brookhaven 🏡RP"),
+  person(103, "Rime", "online", "Website"),
+  person(104, "Sleet", "studio", "Studio"),
+  person(105, "Tundra", "offline"),
+  person(106, "Aurora", "offline"),
+  person(107, "Borealis", "offline"),
+];
+let demoRequests: Person[] = [person(201, "Hailstone", "offline"), person(202, "Permafrost", "offline")];
 
 type Listener = (event: { payload: unknown }) => void;
 const listeners = new Map<string, Set<Listener>>();
@@ -193,6 +211,25 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       const a = active();
       if (!a) throw { kind: "not_signed_in", message: "You're not signed in to Roblox." };
       return launch(args.game as Game, a);
+    }
+    case "list_friends":
+      await wait(300);
+      if (s in ERRORS) throw ERRORS[s];
+      return s === "empty" || active()?.id === 2 ? [] : demoFriends;
+    case "list_friend_requests":
+      return s === "empty" || active()?.id === 2 ? [] : demoRequests;
+    case "answer_friend_request": {
+      const who = demoRequests.find((r) => r.id === args.userId);
+      demoRequests = demoRequests.filter((r) => r.id !== args.userId);
+      if (who && args.accept) demoFriends = [...demoFriends, who];
+      return null;
+    }
+    case "join_friend": {
+      const friend = demoFriends.find((f) => f.id === args.userId);
+      const a = active();
+      if (!friend?.presence.gameId) throw { kind: "other", message: "That friend's game can't be joined: their privacy settings hide the server." };
+      if (!a) throw { kind: "not_signed_in", message: "You're not signed in to Roblox." };
+      return launch(DEMO_GAMES[0], a);
     }
     case "list_instances":
       return instances.map((i) => ({

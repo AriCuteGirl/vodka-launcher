@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { Account, AppError, Chart, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, Chart, Person, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -39,6 +39,10 @@ export const api = {
   searchGames: (query: string) => call<Game[]>("search_games", { query }),
   gameCharts: () => call<Chart[]>("game_charts"),
   launchGame: (game: Game) => call<number>("launch_game", { game }),
+  listFriends: () => call<Person[]>("list_friends"),
+  listFriendRequests: () => call<Person[]>("list_friend_requests"),
+  answerFriendRequest: (userId: number, accept: boolean) => call<void>("answer_friend_request", { userId, accept }),
+  joinFriend: (userId: number) => call<number>("join_friend", { userId }),
   listInstances: () => call<Instance[]>("list_instances"),
   stopInstance: (id: number, restart: boolean) => call<void>("stop_instance", { id, restart }),
   getSettings: () => call<Settings>("get_settings"),

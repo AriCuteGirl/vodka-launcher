@@ -1,7 +1,9 @@
 <script lang="ts">
   import { elapsed, memory } from "$lib/format";
-  import { app, refreshMocktail, stopInstance } from "$lib/state.svelte";
+  import { app, joinFriend, refreshMocktail, stopInstance } from "$lib/state.svelte";
+  import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
+  import Skeleton from "./Skeleton.svelte";
 
   let now = $state(Date.now());
   let checking = $state(false);
@@ -17,16 +19,44 @@
   }
 
   const m = $derived(app.mocktail);
+  const around = $derived(app.friends.status === "ready" ? app.friends.data.filter((f) => f.presence.kind !== "offline") : []);
 </script>
 
 <aside class="rail" aria-label="Status">
   <section class="glass friends">
-    <header><h2>Friends</h2><span class="pill">Phase 4</span></header>
-    <div class="soon">
-      <Icon name="friends" size={26} />
-      <p>Who's online, what they're playing, and one-click join.</p>
-    </div>
+    <header>
+      <h2>Friends {#if around.length}<span class="pill">{around.length} around</span>{/if}</h2>
+      <a href="/friends">View all{#if app.friendRequests.length}<i>{app.friendRequests.length}</i>{/if}</a>
+    </header>
+    {#if !app.account}
+      <div class="soon"><Icon name="friends" size={26} /><p>Sign in to see who's online.</p></div>
+    {:else if app.friends.status === "loading"}
+      <div class="list" aria-busy="true">
+        {#each Array(4) as _, i (i)}<div class="friend"><Skeleton width="30px" height="30px" radius="50%" /><Skeleton width="60%" height="12px" /></div>{/each}
+      </div>
+    {:else if app.friends.status === "error"}
+      <div class="soon"><Icon name="alert" size={26} /><p>{app.friends.error.message}</p></div>
+    {:else if around.length === 0}
+      <div class="soon">
+        <Icon name="friends" size={26} />
+        <p>{app.friends.data.length ? "Nobody's online right now." : "No friends on this account yet."}</p>
+      </div>
+    {:else}
+      <ul class="list">
+        {#each around.slice(0, 8) as f (f.id)}
+          <li class="friend">
+            <Avatar name={f.displayName} src={f.avatarUrl} size={30} status={f.presence.kind === "in_game" ? "playing" : "online"} />
+            <div class="who">
+              <b>{f.displayName}</b>
+              <span>{f.presence.kind === "in_game" ? (f.presence.location ?? "In a game") : f.presence.kind === "studio" ? "In Studio" : "Online"}</span>
+            </div>
+            {#if f.presence.gameId}<button class="mini" onclick={() => joinFriend(f)}>Join</button>{/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </section>
+
   {#each app.instances as inst (inst.id)}
     <section class="glass session" class:mine={inst.accountId === app.account?.id}>
       <header>
@@ -215,6 +245,70 @@
     display: flex;
     flex-direction: column;
     min-height: 220px;
+  }
+  header a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--fs-xs);
+    color: var(--text-1);
+    text-decoration: none;
+  }
+  header a:hover {
+    color: var(--frost);
+  }
+  header a i {
+    font-style: normal;
+    font-weight: 700;
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: var(--r-full);
+    background: var(--frost);
+    color: var(--frost-ink);
+    text-align: center;
+  }
+  h2 .pill {
+    margin-left: 6px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .list {
+    display: grid;
+    gap: 2px;
+    margin: 0 calc(var(--s-2) * -1);
+    padding: 0;
+    list-style: none;
+  }
+  .friend {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    padding: 6px var(--s-2);
+    border-radius: var(--r-sm);
+  }
+  li.friend:hover {
+    background: var(--glass-hover);
+  }
+  .friend .who {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    line-height: 1.25;
+  }
+  .friend b {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .friend span,
+  .friend b {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .friend span {
+    font-size: var(--fs-xs);
+    color: var(--text-2);
   }
   .soon {
     flex: 1;

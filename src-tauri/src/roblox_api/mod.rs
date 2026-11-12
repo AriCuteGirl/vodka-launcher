@@ -3,7 +3,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Chart, Game, Presence, User};
+pub use parse::{Chart, Game, Person, Presence, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -16,6 +16,9 @@ const CHARTS_TTL: Duration = Duration::from_secs(300);
 const GAMES_PER_CHART: usize = 24;
 /// The thumbnails API takes at most this many ids per request.
 const ICON_BATCH: usize = 100;
+const USER_BATCH: usize = 100;
+const PRESENCE_BATCH: usize = 50;
+const NAMES_TTL: Duration = Duration::from_secs(600);
 
 /// Only https://roblox.com and its subdomains may ever be contacted.
 pub fn check_url(url: &Url) -> Result<()> {
@@ -138,23 +141,102 @@ impl Client {
 
     /// Avatar pictures for any users. Public, no session needed.
     pub async fn headshots(&self, ids: &[u64]) -> Result<HashMap<u64, String>> {
-        if ids.is_empty() {
-            return Ok(HashMap::new());
+        let mut all = HashMap::new();
+        for batch in ids.chunks(USER_BATCH) {
+            let url = format!(
+                "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={}&size=150x150&format=Png&isCircular=false",
+                join_ids(batch)
+            );
+            all.extend(parse::thumbnails(&self.get(&url, None, THUMB_TTL).await?)?);
         }
-        let url = format!(
-            "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={}&size=150x150&format=Png&isCircular=false",
-            join_ids(ids)
-        );
-        parse::thumbnails(&self.get(&url, None, THUMB_TTL).await?)
+        Ok(all)
     }
 
     pub async fn presences(&self, cookie: &str, ids: &[u64]) -> Result<HashMap<u64, Presence>> {
-        if ids.is_empty() {
-            return Ok(HashMap::new());
+        let mut all = HashMap::new();
+        for batch in ids.chunks(PRESENCE_BATCH) {
+            let request = serde_json::json!({ "userIds": batch });
+            let body = self.send("https://presence.roblox.com/v1/presence/users", Some(&request), Some(cookie)).await?;
+            all.extend(parse::presences(&body)?);
         }
-        let request = serde_json::json!({ "userIds": ids });
-        let body = self.send("https://presence.roblox.com/v1/presence/users", Some(&request), Some(cookie)).await?;
-        parse::presences(&body)
+        Ok(all)
+    }
+
+    /// Usernames and display names. Public; cached, since names rarely change.
+    async fn names(&self, ids: &[u64]) -> Result<HashMap<u64, (String, String)>> {
+        let mut all = HashMap::new();
+        for batch in ids.chunks(USER_BATCH) {
+            let key = format!("names:{}", join_ids(batch));
+            let cached = self.cache.lock().unwrap().get(&key).filter(|(at, _)| at.elapsed() < NAMES_TTL).map(|(_, b)| b.clone());
+            let body = match cached {
+                Some(body) => body,
+                None => {
+                    let request = serde_json::json!({ "userIds": batch, "excludeBannedUsers": false });
+                    let body = self.send("https://users.roblox.com/v1/users", Some(&request), None).await?;
+                    self.cache.lock().unwrap().insert(key, (Instant::now(), body.clone()));
+                    body
+                }
+            };
+            all.extend(parse::user_names(&body)?);
+        }
+        Ok(all)
+    }
+
+    /// Turns ids into people with names, pictures and (optionally) presence.
+    async fn people(&self, cookie: &str, ids: &[u64], with_presence: bool) -> Result<Vec<Person>> {
+        let names = self.names(ids).await?;
+        // Pictures and presence are extras; a list of names is still useful without them.
+        let avatars = self.headshots(ids).await.unwrap_or_default();
+        let mut presence = if with_presence { self.presences(cookie, ids).await.unwrap_or_default() } else { HashMap::new() };
+        Ok(ids
+            .iter()
+            .filter_map(|id| {
+                let (name, display_name) = names.get(id)?.clone();
+                Some(Person {
+                    id: *id,
+                    name,
+                    display_name,
+                    avatar_url: avatars.get(id).cloned(),
+                    presence: presence.remove(id).unwrap_or_else(Presence::offline),
+                })
+            })
+            .collect())
+    }
+
+    pub async fn friends(&self, cookie: &str, user_id: u64) -> Result<Vec<Person>> {
+        let url = format!("https://friends.roblox.com/v1/users/{user_id}/friends");
+        let ids = parse::id_list(&self.get(&url, Some(cookie), LIST_TTL).await?)?;
+        let mut people = self.people(cookie, &ids, true).await?;
+        parse::sort_people(&mut people);
+        Ok(people)
+    }
+
+    /// People who asked to be friends. Never cached: the list changes when the user answers.
+    pub async fn friend_requests(&self, cookie: &str) -> Result<Vec<Person>> {
+        let url = "https://friends.roblox.com/v1/my/friends/requests?limit=50&sortOrder=Desc";
+        let ids = parse::id_list(&self.send(url, None, Some(cookie)).await?)?;
+        self.people(cookie, &ids, false).await
+    }
+
+    /// Accepts or declines a friend request. Only ever called from a button the user pressed.
+    pub async fn answer_friend_request(&self, cookie: &str, user_id: u64, accept: bool) -> Result<()> {
+        let action = if accept { "accept-friend-request" } else { "decline-friend-request" };
+        let url = format!("https://friends.roblox.com/v1/users/{user_id}/{action}");
+        self.send(&url, Some(&serde_json::json!({})), Some(cookie)).await?;
+        // The friends list just changed.
+        self.cache.lock().unwrap().retain(|key, _| !key.contains("/friends"));
+        Ok(())
+    }
+
+    /// The game a presence points at, with its name and icon, for showing a join as a running game.
+    pub async fn game_for(&self, universe_id: u64, place_id: u64, fallback_name: &str) -> Game {
+        let url = format!("https://games.roblox.com/v1/games?universeIds={universe_id}");
+        let found = match self.get(&url, None, LIST_TTL).await {
+            Ok(body) => parse::games(&body).ok().and_then(|mut g| g.pop()),
+            Err(_) => None,
+        };
+        let game = found.unwrap_or(Game { universe_id, place_id, name: fallback_name.to_owned(), playing: None, icon_url: None });
+        self.with_icons(vec![game]).await.remove(0)
     }
 
     async fn icons(&self, ids: &[u64]) -> Result<HashMap<u64, String>> {
@@ -276,6 +358,23 @@ mod tests {
         assert!(charts.len() >= 3);
         assert!(charts.iter().all(|c| !c.games.is_empty() && c.games.len() <= GAMES_PER_CHART));
         assert!(charts[0].games.iter().any(|g| g.icon_url.is_some()));
+    }
+
+    /// Needs a real session: VODKA_TEST_COOKIE and VODKA_TEST_USER_ID. Prints counts only.
+    #[tokio::test]
+    #[ignore]
+    async fn live_friends_have_names_and_presence() {
+        let cookie = std::env::var("VODKA_TEST_COOKIE").expect("VODKA_TEST_COOKIE");
+        let id: u64 = std::env::var("VODKA_TEST_USER_ID").expect("VODKA_TEST_USER_ID").parse().unwrap();
+        let client = Client::new();
+        let friends = client.friends(&cookie, id).await.unwrap();
+        assert!(friends.iter().all(|f| !f.name.is_empty() && !f.display_name.is_empty()));
+        let with_avatar = friends.iter().filter(|f| f.avatar_url.is_some()).count();
+        let online = friends.iter().filter(|f| f.presence.kind != "offline").count();
+        let joinable = friends.iter().filter(|f| f.presence.join_target().is_some()).count();
+        println!("friends={} with_avatar={with_avatar} not_offline={online} joinable={joinable}", friends.len());
+        let requests = client.friend_requests(&cookie).await.unwrap();
+        println!("requests={}", requests.len());
     }
 
     #[test]

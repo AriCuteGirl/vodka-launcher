@@ -66,11 +66,11 @@
   </Modal>
 {/if}
 
-{#if app.pendingSecondGame}
-  <Modal title="Run two games at once?" onclose={() => (app.pendingSecondGame = null)}>
+{#if app.pendingLaunch}
+  <Modal title="Run two games at once?" onclose={() => (app.pendingLaunch = null)}>
     <div class="warn">
       <p>
-        You're about to start <b>{app.pendingSecondGame.name}</b> while another game is running. Before you do:
+        You're about to start <b>{app.pendingLaunch.name}</b> while another game is running. Before you do:
       </p>
       <ul>
         <li>Roblox's Terms of Use don't allow working around its limit on running clients. Accounts that do can be restricted or banned.</li>
@@ -80,7 +80,7 @@
       <p class="faint">This is your call and your risk. Vodka asks once and remembers the answer.</p>
     </div>
     {#snippet actions()}
-      <Button onclick={() => (app.pendingSecondGame = null)}>Cancel</Button>
+      <Button onclick={() => (app.pendingLaunch = null)}>Cancel</Button>
       <Button variant="primary" onclick={acceptMultiInstance}>I understand, start it</Button>
     {/snippet}
   </Modal>

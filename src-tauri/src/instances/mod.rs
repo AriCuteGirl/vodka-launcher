@@ -10,7 +10,7 @@ pub mod profiles;
 use crate::accounts;
 use crate::error::{AppError, Result};
 use crate::mocktail::detect::APP_ID;
-use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, launch_uri, parse_present_sample, redact};
+use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, parse_present_sample, redact};
 use crate::roblox_api::Game;
 use crate::settings::SavedAccount;
 use profiles::ProfilePaths;
@@ -44,6 +44,7 @@ struct Instance {
     frame_sample: Option<(u64, u64)>,
     fps: Option<f64>,
     env: Vec<(&'static str, String)>,
+    uri: String,
 }
 
 #[derive(Default)]
@@ -142,6 +143,7 @@ pub async fn launch(
     manager: SharedManager,
     account: SavedAccount,
     game: Game,
+    uri: String,
     env: Vec<(&'static str, String)>,
 ) -> Result<u32> {
     let used: Vec<(usize, u64)> = manager.lock().unwrap().instances.iter().map(|i| (i.slot, i.account.id)).collect();
@@ -169,7 +171,7 @@ pub async fn launch(
     if let Some(command) = SLOT_COMMANDS[slot] {
         cmd.arg(format!("--command={command}"));
     }
-    cmd.args([APP_ID, &launch_uri(game.place_id)])
+    cmd.args([APP_ID, &uri])
         .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
         .env("MOCKTAIL_DATA_ROOT", &profile.data)
         .env("MOCKTAIL_CACHE_ROOT", &profile.cache)
@@ -201,6 +203,7 @@ pub async fn launch(
         frame_sample: None,
         fps: None,
         env,
+        uri,
     });
     drop(m);
 
@@ -241,7 +244,7 @@ pub async fn launch(
         );
         let _ = app.emit("instances://changed", ());
         if inst.restart {
-            if let Err(e) = launch_boxed(app.clone(), manager, inst.account, inst.game, inst.env).await {
+            if let Err(e) = launch_boxed(app.clone(), manager, inst.account, inst.game, inst.uri, inst.env).await {
                 let _ = app.emit("instances://error", e);
             }
         }
@@ -257,9 +260,10 @@ fn launch_boxed(
     manager: SharedManager,
     account: SavedAccount,
     game: Game,
+    uri: String,
     env: Vec<(&'static str, String)>,
 ) -> LaunchFuture {
-    Box::pin(launch(app, manager, account, game, env))
+    Box::pin(launch(app, manager, account, game, uri, env))
 }
 
 /// Asks an instance's whole process tree to stop. With `restart`, it is started again once it has closed.

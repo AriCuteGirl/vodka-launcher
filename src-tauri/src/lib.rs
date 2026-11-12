@@ -9,7 +9,7 @@ mod tweaks;
 use error::{AppError, Result};
 use instances::{InstanceView, SharedManager};
 use mocktail::detect::MocktailStatus;
-use roblox_api::{Chart, Game, Presence, User};
+use roblox_api::{Chart, Game, Person, Presence, User};
 use serde::{Deserialize, Serialize};
 use settings::{SavedAccount, Settings};
 use std::path::PathBuf;
@@ -191,8 +191,8 @@ async fn game_charts(state: State<'_, AppState>) -> Result<Vec<Chart>> {
     state.api.charts().await
 }
 
-#[tauri::command]
-async fn launch_game(app: AppHandle, state: State<'_, AppState>, game: Game) -> Result<u32> {
+/// Checks Mocktail is there and works out who is playing with which options.
+async fn prepare_launch(app: &AppHandle) -> Result<(SavedAccount, Vec<(&'static str, String)>)> {
     let status = blocking(|| Ok(mocktail::detect::detect())).await?;
     if !status.flatpak_available {
         return Err(AppError::FlatpakMissing);
@@ -200,12 +200,60 @@ async fn launch_game(app: AppHandle, state: State<'_, AppState>, game: Game) -> 
     if !status.installed {
         return Err(AppError::MocktailMissing);
     }
-    let saved = settings::load(&config_dir(&app)?);
+    let saved = settings::load(&config_dir(app)?);
     let account = saved.active().cloned().ok_or(AppError::NotSignedIn)?;
     let options = tweaks::effective(&saved.defaults, saved.account_options.get(&account.id));
     // Saved options were validated when they were saved; check again in case the file was edited by hand.
     let options = tweaks::validate(&options).map_err(AppError::Launch)?;
-    instances::launch(app, state.instances.clone(), account, game, tweaks::to_env(&options)).await
+    Ok((account, tweaks::to_env(&options)))
+}
+
+#[tauri::command]
+async fn launch_game(app: AppHandle, state: State<'_, AppState>, game: Game) -> Result<u32> {
+    let (account, env) = prepare_launch(&app).await?;
+    let uri = mocktail::launch::launch_uri(game.place_id);
+    instances::launch(app, state.instances.clone(), account, game, uri, env).await
+}
+
+#[tauri::command]
+async fn list_friends(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Person>> {
+    let (account, cookie) = active_cookie(&app).await?;
+    state.api.friends(&cookie, account.id).await
+}
+
+#[tauri::command]
+async fn list_friend_requests(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Person>> {
+    state.api.friend_requests(&active_cookie(&app).await?.1).await
+}
+
+#[tauri::command]
+async fn answer_friend_request(app: AppHandle, state: State<'_, AppState>, user_id: u64, accept: bool) -> Result<()> {
+    state.api.answer_friend_request(&active_cookie(&app).await?.1, user_id, accept).await
+}
+
+/// Joins the server a friend is on, if Roblox lets us see it. Their presence is read fresh,
+/// so a friend who just left is reported instead of joined.
+#[tauri::command]
+async fn join_friend(app: AppHandle, state: State<'_, AppState>, user_id: u64) -> Result<u32> {
+    let (account, env) = prepare_launch(&app).await?;
+    let cookie = blocking({
+        let id = account.id;
+        move || accounts::load_session(id)
+    })
+    .await?
+    .ok_or(AppError::NotSignedIn)?;
+    let presence = state.api.presences(&cookie, &[user_id]).await?.remove(&user_id);
+    let presence = presence.ok_or_else(|| AppError::Other("Roblox didn't say where that friend is.".into()))?;
+    let Some((place_id, game_id)) = presence.join_target() else {
+        return Err(AppError::Other(match presence.kind {
+            "in_game" => "That friend's game can't be joined: their privacy settings hide the server.".into(),
+            _ => "That friend isn't in a game any more.".into(),
+        }));
+    };
+    let uri = mocktail::launch::join_uri(place_id, game_id);
+    let name = presence.location.clone().unwrap_or_else(|| "a friend's game".into());
+    let game = state.api.game_for(presence.universe_id.unwrap_or(0), presence.root_place_id.unwrap_or(place_id), &name).await;
+    instances::launch(app, state.instances.clone(), account, game, uri, env).await
 }
 
 #[tauri::command]
@@ -304,6 +352,10 @@ pub fn run() {
             search_games,
             game_charts,
             launch_game,
+            list_friends,
+            list_friend_requests,
+            answer_friend_request,
+            join_friend,
             list_instances,
             stop_instance,
             get_settings,

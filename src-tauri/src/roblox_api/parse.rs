@@ -205,6 +205,76 @@ pub struct Presence {
     /// "offline", "online", "in_game" or "studio".
     pub kind: &'static str,
     pub location: Option<String>,
+    /// Where they are, when their privacy settings let us see it.
+    pub place_id: Option<u64>,
+    pub root_place_id: Option<u64>,
+    pub universe_id: Option<u64>,
+    /// The server they are on. Needed to join them.
+    pub game_id: Option<String>,
+}
+
+impl Presence {
+    pub fn offline() -> Self {
+        Presence { kind: "offline", location: None, place_id: None, root_place_id: None, universe_id: None, game_id: None }
+    }
+
+    /// The (place, server) to join this person, if Roblox shared it.
+    pub fn join_target(&self) -> Option<(u64, &str)> {
+        if self.kind != "in_game" {
+            return None;
+        }
+        Some((self.place_id?, self.game_id.as_deref()?))
+    }
+}
+
+/// Someone on Roblox: a friend, or a person who sent a friend request.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Person {
+    pub id: u64,
+    pub name: String,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+    pub presence: Presence,
+}
+
+/// The ids in a friends or friend-requests page. Roblox no longer includes names there.
+pub fn id_list(body: &str) -> Result<Vec<u64>> {
+    #[derive(Deserialize)]
+    struct Raw {
+        id: u64,
+    }
+    let page: Page<Raw> = serde_json::from_str(body).map_err(|e| bad("friends", e))?;
+    Ok(page.data.into_iter().map(|r| r.id).collect())
+}
+
+/// (username, display name) by user id, from the bulk user lookup.
+pub fn user_names(body: &str) -> Result<HashMap<u64, (String, String)>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Raw {
+        id: u64,
+        name: String,
+        display_name: String,
+    }
+    let page: Page<Raw> = serde_json::from_str(body).map_err(|e| bad("users", e))?;
+    Ok(page.data.into_iter().map(|r| (r.id, (r.name, r.display_name))).collect())
+}
+
+/// Server ids are GUIDs. Anything else must never reach a launch link.
+pub fn valid_game_id(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// People in the order a friends list should show them: in a game, online, in Studio, offline; then by name.
+pub fn sort_people(people: &mut [Person]) {
+    let rank = |p: &Person| match p.presence.kind {
+        "in_game" => 0,
+        "online" => 1,
+        "studio" => 2,
+        _ => 3,
+    };
+    people.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase())));
 }
 
 pub fn presences(body: &str) -> Result<HashMap<u64, Presence>> {
@@ -214,6 +284,10 @@ pub fn presences(body: &str) -> Result<HashMap<u64, Presence>> {
         user_id: u64,
         user_presence_type: u8,
         last_location: Option<String>,
+        place_id: Option<u64>,
+        root_place_id: Option<u64>,
+        universe_id: Option<u64>,
+        game_id: Option<String>,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -231,7 +305,16 @@ pub fn presences(body: &str) -> Result<HashMap<u64, Presence>> {
                 3 => "studio",
                 _ => "offline",
             };
-            (p.user_id, Presence { kind, location: p.last_location.filter(|l| !l.is_empty() && kind != "offline") })
+            let visible = kind != "offline";
+            let presence = Presence {
+                kind,
+                location: p.last_location.filter(|l| !l.is_empty() && visible),
+                place_id: p.place_id.filter(|_| visible),
+                root_place_id: p.root_place_id.filter(|_| visible),
+                universe_id: p.universe_id.filter(|_| visible),
+                game_id: p.game_id.filter(|id| visible && valid_game_id(id)),
+            };
+            (p.user_id, presence)
         })
         .collect())
 }
@@ -365,8 +448,50 @@ mod tests {
         // Captured from presence.roblox.com on 2026-11-11.
         let body = r#"{"userPresences":[{"userPresenceType":0,"lastLocation":"Website","placeId":null,"rootPlaceId":null,"gameId":null,"universeId":null,"userId":1},{"userPresenceType":2,"lastLocation":"RIVALS","placeId":5,"rootPlaceId":5,"gameId":"x","universeId":6,"userId":2}]}"#;
         let p = presences(body).unwrap();
-        assert_eq!(p[&1], Presence { kind: "offline", location: None });
-        assert_eq!(p[&2], Presence { kind: "in_game", location: Some("RIVALS".into()) });
+        assert_eq!(p[&1], Presence::offline());
+        assert_eq!(p[&2].kind, "in_game");
+        assert_eq!(p[&2].location.as_deref(), Some("RIVALS"));
+        assert_eq!(p[&2].join_target(), Some((5, "x")));
+        assert_eq!(p[&1].join_target(), None);
+    }
+
+    #[test]
+    fn a_hidden_or_malformed_server_cannot_be_joined() {
+        let body = r#"{"userPresences":[
+            {"userPresenceType":2,"lastLocation":"A","placeId":5,"gameId":null,"userId":1},
+            {"userPresenceType":2,"lastLocation":"B","placeId":5,"gameId":"abc&placeId=666","userId":2},
+            {"userPresenceType":2,"lastLocation":"C","placeId":null,"gameId":"0f0e-11","userId":3},
+            {"userPresenceType":1,"lastLocation":"Website","placeId":5,"gameId":"0f0e-11","userId":4}]}"#;
+        let p = presences(body).unwrap();
+        for id in 1..=4 {
+            assert_eq!(p[&id].join_target(), None, "user {id}");
+        }
+        assert!(valid_game_id("3f2a9c1e-7b1d-4c5e-9a10-aa00bb11cc22"));
+        assert!(!valid_game_id(""));
+    }
+
+    #[test]
+    fn friends_pages_give_ids_and_the_lookup_gives_names() {
+        // Shape captured live on 2026-11-11: names come back empty in the friends list.
+        let ids = id_list(r#"{"data":[{"id":11,"name":"","displayName":""},{"id":12,"name":"","displayName":""}]}"#).unwrap();
+        assert_eq!(ids, vec![11, 12]);
+        let names = user_names(r#"{"data":[{"hasVerifiedBadge":false,"id":11,"name":"snow","displayName":"Snow"}]}"#).unwrap();
+        assert_eq!(names[&11], ("snow".into(), "Snow".into()));
+        assert!(id_list(r#"{"data":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn friends_sort_by_what_they_are_doing_then_name() {
+        let person = |id, name: &str, kind| Person {
+            id,
+            name: name.to_lowercase(),
+            display_name: name.into(),
+            avatar_url: None,
+            presence: Presence { kind, ..Presence::offline() },
+        };
+        let mut people = vec![person(1, "zed", "offline"), person(2, "Bea", "online"), person(3, "amy", "online"), person(4, "Kit", "in_game"), person(5, "Dev", "studio")];
+        sort_people(&mut people);
+        assert_eq!(people.iter().map(|p| p.id).collect::<Vec<_>>(), vec![4, 3, 2, 5, 1]);
     }
 
     #[test]

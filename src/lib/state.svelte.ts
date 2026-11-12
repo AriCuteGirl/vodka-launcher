@@ -1,6 +1,6 @@
 // App-wide reactive state. Components read `app.*` and call the functions below.
 import { api } from "./api";
-import { NO_OPTIONS, toAppError, type LaunchOptions, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, toAppError, type LaunchOptions, type Person, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type Settings, type User } from "./types";
 
 export interface Toast {
   id: number;
@@ -24,8 +24,10 @@ export const app = $state({
   search: "",
   toasts: [] as Toast[],
   crash: null as ExitEvent | null,
-  /** A game waiting for the user to accept the multi-instance warning. */
-  pendingSecondGame: null as Game | null,
+  /** A launch waiting for the user to accept the multi-instance warning. */
+  pendingLaunch: null as { name: string; run: () => Promise<unknown> } | null,
+  friends: { status: "loading" } as Loadable<Person[]>,
+  friendRequests: [] as Person[],
   signingIn: false,
   continuePlaying: { status: "loading" } as Loadable<Game[]>,
   favorites: { status: "loading" } as Loadable<Game[]>,
@@ -130,6 +132,7 @@ async function reloadActiveAccount() {
   }
   await refreshAccounts();
   void loadHome();
+  void refreshFriends();
 }
 
 export async function switchAccount(id: number) {
@@ -155,9 +158,9 @@ export async function removeAccount(id: number) {
   }
 }
 
-async function launch(game: Game) {
+async function launch(run: () => Promise<unknown>) {
   try {
-    await api.launchGame(game);
+    await run();
     await refreshInstances();
   } catch (e) {
     const error = toAppError(e);
@@ -166,7 +169,43 @@ async function launch(game: Game) {
   }
 }
 
-export async function play(game: Game) {
+/** Friends and pending requests of the active account. `quiet` keeps the current list on screen while refreshing. */
+export async function refreshFriends(quiet = false) {
+  if (!app.account) {
+    app.friends = { status: "ready", data: [] };
+    app.friendRequests = [];
+    return;
+  }
+  const forAccount = app.account.id;
+  if (!quiet) app.friends = { status: "loading" };
+  try {
+    const [friends, requests] = await Promise.all([api.listFriends(), api.listFriendRequests().catch(() => [] as Person[])]);
+    if (app.account?.id !== forAccount) return;
+    app.friends = { status: "ready", data: friends };
+    app.friendRequests = requests;
+  } catch (e) {
+    // A failed background refresh shouldn't replace a list that is already showing.
+    if (app.account?.id === forAccount && !(quiet && app.friends.status === "ready")) app.friends = { status: "error", error: toAppError(e) };
+  }
+}
+
+export async function answerFriendRequest(person: Person, accept: boolean) {
+  try {
+    await api.answerFriendRequest(person.id, accept);
+    toast(accept ? `You and ${person.displayName} are now friends.` : `Declined ${person.displayName}'s request.`, "ok");
+  } catch (e) {
+    fail(e);
+  }
+  await refreshFriends(true);
+}
+
+export const joinFriend = (friend: Person) =>
+  start(friend.presence.location ?? `${friend.displayName}'s game`, () => api.joinFriend(friend.id));
+
+export const play = (game: Game) => start(game.name, () => api.launchGame(game));
+
+/** Runs the checks every launch goes through, then starts it. */
+async function start(name: string, run: () => Promise<unknown>) {
   if (!app.account) return;
   const mine = myInstance();
   if (mine) {
@@ -182,17 +221,17 @@ export async function play(game: Game) {
     return;
   }
   if (app.instances.length > 0 && !app.settings.multiInstanceAccepted) {
-    app.pendingSecondGame = game;
+    app.pendingLaunch = { name, run };
     return;
   }
-  await launch(game);
+  await launch(run);
 }
 
 export async function acceptMultiInstance() {
-  const game = app.pendingSecondGame;
-  app.pendingSecondGame = null;
+  const pending = app.pendingLaunch;
+  app.pendingLaunch = null;
   await setFlags({ multiInstanceAccepted: true });
-  if (game && app.settings.multiInstanceAccepted) await launch(game);
+  if (pending && app.settings.multiInstanceAccepted) await launch(pending.run);
 }
 
 /** Saves launch options for all accounts (`accountId` null) or one. Returns the error text if they were rejected. */
@@ -253,12 +292,15 @@ export async function boot() {
     toast(`Signed in as ${user.displayName}.`, "ok");
     void refreshAccounts();
     void loadHome();
+    void refreshFriends();
   });
   await api.onLoginClosed(() => (app.signingIn = false));
   await api.onAuthError((error) => {
     app.signingIn = false;
     toast(error.message, "danger");
   });
+  // Friends come and go; once a minute keeps the rail fresh without leaning on Roblox.
+  setInterval(() => app.account && app.online && void refreshFriends(true), 60_000);
   // CPU and memory only change while something runs.
   setInterval(() => app.instances.length > 0 && void refreshInstances(), 2000);
   try {

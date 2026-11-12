@@ -4,7 +4,7 @@ A Roblox launcher for Linux. Vodka is the front end; [Mocktail](https://github.c
 
 ![First-run setup](docs/screenshots/onboarding.png)
 
-**Status:** phase 3 of 5. Home, sign-in, several accounts, up to two games at once, launch options and an FFlag editor exist. Games, Marketplace and Friends are placeholders.
+**Status:** phase 4 of 5, in progress. Home, Games, Friends, several accounts, up to two games at once, launch options and an FFlag editor exist. Marketplace is a placeholder.
 
 ## What it does today
 
@@ -14,6 +14,8 @@ A Roblox launcher for Linux. Vodka is the front end; [Mocktail](https://github.c
 - Shows Mocktail's output while it starts, and the reason if it crashes.
 - Keeps several accounts, each with its own isolated Mocktail profile, and switches between them.
 - Runs up to two games at once, one per account, with FPS, CPU and memory per game.
+- Searches all of Roblox and shows the public charts.
+- Shows your friends, what they're playing, and friend requests; joins a friend's server when Roblox shares it.
 - Sets frame rate, graphics and FFlags for all accounts or per account, and can hold or roll back the Roblox client.
 
 Running two Roblox clients at once is not supported by Mocktail's developers and is against Roblox's Terms of Use. Vodka warns

@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+Phase 4 (in progress): social.
+
+- Games page: search all of Roblox and browse the public charts, with Play on every tile.
+- Friends page: friends grouped by what they are doing, a filter, friend requests with Accept and Decline, and Join for friends whose server is visible.
+- The right rail lists friends who are online.
+- Pressing Enter in the title-strip search searches all of Roblox.
+
 Phase 3: performance and tweaks.
 
 - Launch options for all accounts or one: frame rate, graphics backend, VSync, present mode, multithreaded rendering, GameMode, memory cap.
