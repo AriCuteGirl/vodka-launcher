@@ -21,6 +21,9 @@ pub struct AppState {
     pub api: roblox_api::Client,
     pub chat: chat::Client,
     pub instances: SharedManager,
+    /// The account this window is using. Kept per running Vodka, so two Vodka windows can use
+    /// two different accounts; the settings file only remembers which one to start with.
+    pub active: std::sync::Mutex<Option<u64>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,8 +60,16 @@ fn flatpak_data() -> Result<PathBuf> {
     Ok(instances::profiles::flatpak_data(&PathBuf::from(home)))
 }
 
+/// Which saved account this window uses: its own choice if it made one and the account still exists,
+/// otherwise the one remembered in settings.
+fn pick_active(saved: &Settings, chosen: Option<u64>) -> Option<SavedAccount> {
+    chosen.and_then(|id| saved.accounts.iter().find(|a| a.id == id)).or_else(|| saved.active()).cloned()
+}
+
 fn active_account(app: &AppHandle) -> Result<Option<SavedAccount>> {
-    Ok(settings::load(&config_dir(app)?).active().cloned())
+    let saved = settings::load(&config_dir(app)?);
+    let chosen = *app.state::<AppState>().active.lock().unwrap();
+    Ok(pick_active(&saved, chosen))
 }
 
 async fn active_cookie(app: &AppHandle) -> Result<(SavedAccount, String)> {
@@ -120,6 +131,7 @@ async fn list_accounts(app: AppHandle, state: State<'_, AppState>) -> Result<Vec
     };
     let running = instances::running_account_ids(&state.instances);
     let data = flatpak_data()?;
+    let active_id = pick_active(&saved, *state.active.lock().unwrap()).map(|a| a.id);
     Ok(saved
         .accounts
         .iter()
@@ -128,7 +140,7 @@ async fn list_accounts(app: AppHandle, state: State<'_, AppState>) -> Result<Vec
             name: a.name.clone(),
             display_name: a.display_name.clone(),
             avatar_url: avatars.get(&a.id).cloned(),
-            active: saved.active_account == Some(a.id),
+            active: active_id == Some(a.id),
             presence: presence.get(&a.id).cloned(),
             in_vodka_game: running.contains(&a.id),
             client_version: instances::profiles::client_version(&instances::profiles::profile_paths(&data, a.id)),
@@ -142,6 +154,7 @@ fn switch_account(app: AppHandle, state: State<'_, AppState>, account_id: u64) -
     if !settings::load(&dir).accounts.iter().any(|a| a.id == account_id) {
         return Err(AppError::Other("That account isn't in Vodka any more.".into()));
     }
+    *state.active.lock().unwrap() = Some(account_id);
     settings::update(&dir, |s| s.active_account = Some(account_id))?;
     state.api.clear_cache();
     Ok(())
@@ -233,7 +246,7 @@ async fn prepare_launch(app: &AppHandle, account_id: Option<u64>) -> Result<(Sav
     let saved = settings::load(&config_dir(app)?);
     let account = match account_id {
         Some(id) => saved.accounts.iter().find(|a| a.id == id).cloned(),
-        None => saved.active().cloned(),
+        None => pick_active(&saved, *app.state::<AppState>().active.lock().unwrap()),
     }
     .ok_or(AppError::NotSignedIn)?;
     let options = tweaks::modernize(tweaks::effective(&saved.defaults, saved.account_options.get(&account.id)));
@@ -643,7 +656,12 @@ fn set_flags(app: AppHandle, flags: Flags) -> Result<Settings> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState { api: roblox_api::Client::new(), chat: chat::Client::new(), instances: SharedManager::default() })
+        .manage(AppState {
+            api: roblox_api::Client::new(),
+            chat: chat::Client::new(),
+            instances: SharedManager::default(),
+            active: std::sync::Mutex::new(None),
+        })
         .invoke_handler(tauri::generate_handler![
             mocktail_status,
             begin_login,
@@ -698,6 +716,19 @@ mod tests {
 
     fn game() -> Game {
         Game { universe_id: 1, place_id: 10, name: "G".into(), playing: None, icon_url: None }
+    }
+
+    #[test]
+    fn each_window_keeps_its_own_active_account() {
+        let acct = |id| SavedAccount { id, name: format!("u{id}"), display_name: format!("U{id}") };
+        let saved = Settings { accounts: vec![acct(1), acct(2)], active_account: Some(1), ..Default::default() };
+        // No choice yet: start with the remembered account.
+        assert_eq!(pick_active(&saved, None).unwrap().id, 1);
+        // This window chose account 2, whatever another window saved since.
+        assert_eq!(pick_active(&saved, Some(2)).unwrap().id, 2);
+        // Its choice was removed elsewhere: fall back instead of acting as nobody.
+        assert_eq!(pick_active(&saved, Some(9)).unwrap().id, 1);
+        assert!(pick_active(&Settings::default(), Some(2)).is_none());
     }
 
     #[test]

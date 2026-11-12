@@ -105,6 +105,8 @@ pub fn open_login(app: &AppHandle) -> Result<()> {
                                     display_name: user.display_name.clone(),
                                 })
                             })?;
+                            // The window that signed in uses the new account.
+                            *state.active.lock().unwrap() = Some(user.id);
                             Ok(user)
                         })(),
                     };
