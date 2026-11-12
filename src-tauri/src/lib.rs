@@ -215,10 +215,29 @@ async fn launch_game(app: AppHandle, state: State<'_, AppState>, game: Game) -> 
     instances::launch(app, state.instances.clone(), account, game, uri, env).await
 }
 
+/// Where one of Vodka's own accounts is, asked with that account's own session.
+/// An account can always see its own server, even with "who can join me" turned off,
+/// so this lets your accounts join each other.
+async fn own_presence(app: &AppHandle, api: &roblox_api::Client, account_id: u64) -> Option<Presence> {
+    let saved = settings::load(&config_dir(app).ok()?);
+    saved.accounts.iter().find(|a| a.id == account_id)?;
+    let cookie = blocking(move || accounts::load_session(account_id)).await.ok()??;
+    api.presences(&cookie, &[account_id]).await.ok()?.remove(&account_id)
+}
+
 #[tauri::command]
 async fn list_friends(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Person>> {
     let (account, cookie) = active_cookie(&app).await?;
-    state.api.friends(&cookie, account.id).await
+    let mut friends = state.api.friends(&cookie, account.id).await?;
+    let mine: Vec<u64> = settings::load(&config_dir(&app)?).accounts.iter().map(|a| a.id).collect();
+    for friend in friends.iter_mut().filter(|f| mine.contains(&f.id) && f.presence.join_target().is_none()) {
+        if let Some(own) = own_presence(&app, &state.api, friend.id).await {
+            if own.join_target().is_some() {
+                friend.presence = own;
+            }
+        }
+    }
+    Ok(friends)
 }
 
 #[tauri::command]
@@ -243,7 +262,12 @@ async fn join_friend(app: AppHandle, state: State<'_, AppState>, user_id: u64) -
     .await?
     .ok_or(AppError::NotSignedIn)?;
     let presence = state.api.presences(&cookie, &[user_id]).await?.remove(&user_id);
-    let presence = presence.ok_or_else(|| AppError::Other("Roblox didn't say where that friend is.".into()))?;
+    let mut presence = presence.ok_or_else(|| AppError::Other("Roblox didn't say where that friend is.".into()))?;
+    if presence.join_target().is_none() {
+        if let Some(own) = own_presence(&app, &state.api, user_id).await {
+            presence = own;
+        }
+    }
     let Some((place_id, game_id)) = presence.join_target() else {
         return Err(AppError::Other(match presence.kind {
             "in_game" => "That friend's game can't be joined: their privacy settings hide the server.".into(),
