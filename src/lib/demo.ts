@@ -263,7 +263,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return chatOn;
     case "chat_start_verify":
       await wait(300);
-      return { challenge: "vodka breeze saffron bridge cloud copper" };
+      return { challenge: "breeze saffron bridge cloud copper lantern" };
     case "chat_finish_verify":
       await wait(600);
       chatOn = true;

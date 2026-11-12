@@ -80,8 +80,12 @@ async function robloxProfile(id: number) {
 async function startVerify(body: Record<string, unknown>) {
   const id = robloxId(body.robloxId);
   const existing = must(await db.from("vodka_verifications").select("challenge, expires_at").eq("roblox_id", id).maybeSingle());
-  if (existing && new Date(existing.expires_at) > new Date()) return { challenge: existing.challenge };
-  const challenge = "vodka " + Array.from({ length: 5 }, () => WORDS[randomInt(WORDS.length)]).join(" ");
+  // Phrases are plain everyday words only: Roblox's text filter hides brand and alcohol words in profiles.
+  // (An early version prefixed "vodka"; such a pending phrase is replaced rather than reused.)
+  if (existing && new Date(existing.expires_at) > new Date() && !existing.challenge.startsWith("vodka ")) {
+    return { challenge: existing.challenge };
+  }
+  const challenge = Array.from({ length: 6 }, () => WORDS[randomInt(WORDS.length)]).join(" ");
   must(
     await db.from("vodka_verifications").upsert({
       roblox_id: id,
