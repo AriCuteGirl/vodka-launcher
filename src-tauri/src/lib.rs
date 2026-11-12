@@ -1,4 +1,5 @@
 mod accounts;
+mod chat;
 mod error;
 mod instances;
 mod mocktail;
@@ -18,6 +19,7 @@ use tauri::{AppHandle, Manager, State};
 
 pub struct AppState {
     pub api: roblox_api::Client,
+    pub chat: chat::Client,
     pub instances: SharedManager,
 }
 
@@ -157,6 +159,8 @@ async fn remove_account(app: AppHandle, state: State<'_, AppState>, account_id: 
     }
     blocking(move || {
         accounts::clear_session(account_id)?;
+        // Chat is only turned off here; the chat account can be deleted from the Chat page first.
+        chat::clear_token(account_id)?;
         let data = flatpak_data()?;
         instances::profiles::remove_tree(&instances::profiles::profile_paths(&data, account_id).root)
             .map_err(|e| AppError::Other(format!("Signed out, but the account's game profile couldn't be deleted: {e}")))
@@ -418,6 +422,127 @@ async fn rollback_client(app: AppHandle, state: State<'_, AppState>, account_id:
     })
 }
 
+/// The active account and its chat sign-in, or `ChatSignedOut` when chat isn't turned on for it.
+async fn chat_session(app: &AppHandle) -> Result<(SavedAccount, String)> {
+    let account = active_account(app)?.ok_or(AppError::NotSignedIn)?;
+    let id = account.id;
+    let token = blocking(move || chat::load_token(id)).await?.ok_or(AppError::ChatSignedOut)?;
+    Ok((account, token))
+}
+
+/// Runs a signed-in chat action. A sign-in the server no longer accepts is forgotten locally.
+async fn chat_call(app: &AppHandle, state: &AppState, action: &str, body: serde_json::Value) -> Result<serde_json::Value> {
+    let (account, token) = chat_session(app).await?;
+    match state.chat.call(Some(&token), body, action).await {
+        Err(AppError::ChatSignedOut) => {
+            let id = account.id;
+            let _ = blocking(move || chat::clear_token(id)).await;
+            Err(AppError::ChatSignedOut)
+        }
+        other => other,
+    }
+}
+
+/// Whether chat is turned on for the active account on this computer.
+#[tauri::command]
+async fn chat_enabled(app: AppHandle) -> Result<bool> {
+    match chat_session(&app).await {
+        Ok(_) => Ok(true),
+        Err(AppError::ChatSignedOut) | Err(AppError::NotSignedIn) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Asks the chat server for the phrase to put in the Roblox profile.
+#[tauri::command]
+async fn chat_start_verify(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value> {
+    let account = active_account(&app)?.ok_or(AppError::NotSignedIn)?;
+    state.chat.call(None, serde_json::json!({ "robloxId": account.id }), "start_verify").await
+}
+
+/// Asks the chat server to look for the phrase; on success the chat sign-in goes into the keyring.
+#[tauri::command]
+async fn chat_finish_verify(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value> {
+    let account = active_account(&app)?.ok_or(AppError::NotSignedIn)?;
+    let mut answer = state.chat.call(None, serde_json::json!({ "robloxId": account.id }), "finish_verify").await?;
+    let token = answer.get("token").and_then(|t| t.as_str()).unwrap_or_default().to_owned();
+    let id = account.id;
+    blocking(move || chat::store_token(id, &token)).await?;
+    // The sign-in stays in the backend; the UI only needs to know who it is.
+    if let Some(map) = answer.as_object_mut() {
+        map.remove("token");
+    }
+    Ok(answer)
+}
+
+#[tauri::command]
+async fn chat_sync(app: AppHandle, state: State<'_, AppState>, since: u64) -> Result<serde_json::Value> {
+    chat_call(&app, &state, "sync", serde_json::json!({ "since": since })).await
+}
+
+#[tauri::command]
+async fn chat_add_contact(app: AppHandle, state: State<'_, AppState>, code: String) -> Result<serde_json::Value> {
+    chat_call(&app, &state, "add_contact", serde_json::json!({ "code": code })).await
+}
+
+#[tauri::command]
+async fn chat_remove_contact(app: AppHandle, state: State<'_, AppState>, user_id: u64) -> Result<serde_json::Value> {
+    chat_call(&app, &state, "remove_contact", serde_json::json!({ "robloxId": user_id })).await
+}
+
+#[tauri::command]
+async fn chat_block(app: AppHandle, state: State<'_, AppState>, user_id: u64, blocked: bool) -> Result<serde_json::Value> {
+    chat_call(&app, &state, if blocked { "block" } else { "unblock" }, serde_json::json!({ "robloxId": user_id })).await
+}
+
+#[tauri::command]
+async fn chat_report(app: AppHandle, state: State<'_, AppState>, user_id: u64, reason: String) -> Result<serde_json::Value> {
+    chat_call(&app, &state, "report", serde_json::json!({ "robloxId": user_id, "reason": reason })).await
+}
+
+#[tauri::command]
+async fn chat_send(app: AppHandle, state: State<'_, AppState>, to: u64, body: String) -> Result<serde_json::Value> {
+    chat_call(&app, &state, "send", serde_json::json!({ "to": to, "kind": "text", "body": body })).await
+}
+
+/// Invites someone to the game the active account is playing through Vodka, with its exact server when Roblox shares it.
+#[tauri::command]
+async fn chat_invite(app: AppHandle, state: State<'_, AppState>, to: u64) -> Result<serde_json::Value> {
+    let account = active_account(&app)?.ok_or(AppError::NotSignedIn)?;
+    let manager = state.instances.clone();
+    let running = blocking(move || Ok(instances::list(&manager))).await?;
+    let mine = running
+        .into_iter()
+        .find(|i| i.account_id == account.id)
+        .ok_or_else(|| AppError::Chat("Start a game first, then invite people to it.".into()))?;
+    let here = own_presence(&app, &state.api, account.id).await;
+    let server = here.as_ref().and_then(|p| p.join_target());
+    let payload = serde_json::json!({
+        "game": mine.game,
+        "placeId": server.map(|(place, _)| place).unwrap_or(mine.game.place_id),
+        "gameId": server.map(|(_, id)| id),
+    });
+    chat_call(&app, &state, "send", serde_json::json!({ "to": to, "kind": "invite", "body": "", "payload": payload })).await
+}
+
+/// Turns chat off on this computer for the active account. The chat account itself stays.
+#[tauri::command]
+async fn chat_sign_out(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let account = active_account(&app)?.ok_or(AppError::NotSignedIn)?;
+    let _ = chat_call(&app, &state, "sign_out", serde_json::json!({})).await;
+    let id = account.id;
+    blocking(move || chat::clear_token(id)).await
+}
+
+/// Deletes the active account's chat account on the server: contacts, messages, everything.
+#[tauri::command]
+async fn chat_delete_account(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let account = active_account(&app)?.ok_or(AppError::NotSignedIn)?;
+    chat_call(&app, &state, "delete_account", serde_json::json!({})).await?;
+    let id = account.id;
+    blocking(move || chat::clear_token(id)).await
+}
+
 #[tauri::command]
 fn get_settings(app: AppHandle) -> Result<Settings> {
     Ok(settings::load(&config_dir(&app)?))
@@ -438,7 +563,7 @@ fn set_flags(app: AppHandle, flags: Flags) -> Result<Settings> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState { api: roblox_api::Client::new(), instances: SharedManager::default() })
+        .manage(AppState { api: roblox_api::Client::new(), chat: chat::Client::new(), instances: SharedManager::default() })
         .invoke_handler(tauri::generate_handler![
             mocktail_status,
             begin_login,
@@ -463,7 +588,19 @@ pub fn run() {
             set_flags,
             check_fflag,
             save_launch_options,
-            rollback_client
+            rollback_client,
+            chat_enabled,
+            chat_start_verify,
+            chat_finish_verify,
+            chat_sync,
+            chat_add_contact,
+            chat_remove_contact,
+            chat_block,
+            chat_report,
+            chat_send,
+            chat_invite,
+            chat_sign_out,
+            chat_delete_account
         ])
         .run(tauri::generate_context!())
         .expect("error while running Vodka Launcher");

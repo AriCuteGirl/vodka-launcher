@@ -26,6 +26,10 @@ pub enum AppError {
     #[error("Vodka refused to contact an address that isn't roblox.com.")]
     BlockedUrl,
     #[error("{0}")]
+    Chat(String),
+    #[error("You're not signed in to Vodka chat on this account.")]
+    ChatSignedOut,
+    #[error("{0}")]
     Other(String),
 }
 
@@ -42,6 +46,8 @@ impl AppError {
             Self::Api(_) => "api",
             Self::Keyring(_) => "keyring",
             Self::BlockedUrl => "blocked_url",
+            Self::Chat(_) => "chat",
+            Self::ChatSignedOut => "chat_signed_out",
             Self::Other(_) => "other",
         }
     }

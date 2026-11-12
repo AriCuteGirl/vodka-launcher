@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { Account, AppError, Chart, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, Chart, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -52,6 +52,18 @@ export const api = {
   checkFflag: (name: string, value: string) => call<[string, string]>("check_fflag", { name, value }),
   saveLaunchOptions: (accountId: number | null, options: LaunchOptions | null) => call<Settings>("save_launch_options", { accountId, options }),
   rollbackClient: (accountId: number) => call<Settings>("rollback_client", { accountId }),
+  chatEnabled: () => call<boolean>("chat_enabled"),
+  chatStartVerify: () => call<{ challenge: string }>("chat_start_verify"),
+  chatFinishVerify: () => call<{ me: ChatMe }>("chat_finish_verify"),
+  chatSync: (since: number) => call<ChatSync>("chat_sync", { since }),
+  chatAddContact: (code: string) => call<{ contact: ChatContact }>("chat_add_contact", { code }),
+  chatRemoveContact: (userId: number) => call<unknown>("chat_remove_contact", { userId }),
+  chatBlock: (userId: number, blocked: boolean) => call<unknown>("chat_block", { userId, blocked }),
+  chatReport: (userId: number, reason: string) => call<unknown>("chat_report", { userId, reason }),
+  chatSend: (to: number, body: string) => call<{ message: ChatMessage }>("chat_send", { to, body }),
+  chatInvite: (to: number) => call<{ message: ChatMessage }>("chat_invite", { to }),
+  chatSignOut: () => call<void>("chat_sign_out"),
+  chatDeleteAccount: () => call<void>("chat_delete_account"),
   onInstancesChanged: (h: () => void) => on<null>("instances://changed", h),
   onInstanceExit: (h: (event: ExitEvent) => void) => on<ExitEvent>("instances://exit", h),
   onInstanceError: (h: (error: AppError) => void) => on<AppError>("instances://error", h),

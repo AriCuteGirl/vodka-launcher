@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { chat } from "$lib/chat.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
 
   const items: { href: string; label: string; icon: IconName }[] = [
@@ -8,6 +9,7 @@
     { href: "/players", label: "Players", icon: "players" },
     { href: "/marketplace", label: "Marketplace", icon: "market" },
     { href: "/friends", label: "Friends", icon: "friends" },
+    { href: "/chat", label: "Chat", icon: "chat" },
   ];
   const active = (href: string) => (href === "/" ? page.url.pathname === "/" : page.url.pathname.startsWith(href));
 </script>
@@ -18,6 +20,7 @@
       <li>
         <a href={item.href} class:active={active(item.href)} aria-current={active(item.href) ? "page" : undefined} aria-label={item.label}>
           <Icon name={item.icon} size={19} />
+          {#if item.href === "/chat" && chat.unreadTotal > 0}<i class="badge">{chat.unreadTotal > 9 ? "9+" : chat.unreadTotal}</i>{/if}
           <span class="tip" aria-hidden="true">{item.label}</span>
         </a>
       </li>
@@ -78,6 +81,21 @@
     border-radius: 0 3px 3px 0;
     background: var(--frost);
     box-shadow: 0 0 12px var(--frost-strong);
+  }
+  .badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: var(--r-full);
+    background: var(--frost);
+    color: var(--frost-ink);
+    font-size: 0.625rem;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
   }
   .tip {
     position: absolute;

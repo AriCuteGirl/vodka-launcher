@@ -55,6 +55,8 @@ The browser-only UI accepts `?demo=` to show a state: `loading`, `empty`, `error
 | `src-tauri/src/accounts` | Login window and keyring storage, one entry per account |
 | `src-tauri/src/instances` | Running games: per-account profiles, slots, CPU/RAM, stop and restart |
 | `src-tauri/src/roblox_api` | Typed Roblox web API client: host allowlist, cache, backoff |
+| `src-tauri/src/chat.rs` | Client for Vodka's own chat server |
+| `server/supabase` | The chat server: database migration and edge function |
 | `src-tauri/src/tweaks.rs` | Launch options and FFlag validation, mapped to Mocktail's environment variables |
 | `src-tauri/src/settings.rs` | Non-secret preferences |
 | `src/lib` | UI: design tokens, components, state |
@@ -62,7 +64,12 @@ The browser-only UI accepts `?demo=` to show a state: `loading`, `empty`, `error
 
 ## Privacy and safety
 
-- Vodka contacts `*.roblox.com` only, plus Roblox's image CDN for thumbnails. No telemetry.
+- Vodka contacts `*.roblox.com` and Roblox's image CDN for thumbnails. No telemetry.
+- **Vodka chat is the one exception, and it is off until you turn it on.** It talks to Vodka's own chat server (a Supabase
+  project, source in `server/`). That server receives your Roblox user id, your public names, and the messages and game
+  invites you send. It never receives your Roblox session. You prove an account is yours by putting a phrase in your public
+  Roblox profile. Messages are deleted after 14 days, and you can delete your chat account from the Chat page.
+- Roblox does not filter or moderate Vodka chat. Only people you add with a Vodka code can message you.
 - Your Roblox session is an account key. Vodka keeps it in the keyring, never logs it, and hides any log line that contains one.
 - No exploits, executors, script injection, or anything that touches Roblox's anti-cheat.
 

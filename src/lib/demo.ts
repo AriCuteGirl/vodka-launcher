@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import { NO_OPTIONS, type Account, type AppError, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, type Account, type AppError, type ChatContact, type ChatMessage, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -96,6 +96,21 @@ let demoFriends: Person[] = [
   person(107, "Borealis", "offline"),
 ];
 let demoRequests: Person[] = [person(201, "Hailstone", "offline"), person(202, "Permafrost", "offline")];
+
+let chatOn = scenario() === "chat";
+let chatContacts: ChatContact[] = [
+  { robloxId: 301, name: "glacier_gg", displayName: "Glacier", online: true },
+  { robloxId: 302, name: "rime", displayName: "Rime", online: false },
+];
+let chatId = 3;
+let chatMessages: ChatMessage[] = [
+  { id: 1, sender: 301, recipient: 1, kind: "text", body: "yo, you on?", payload: null, createdAt: new Date(Date.now() - 600_000).toISOString() },
+  { id: 2, sender: 1, recipient: 301, kind: "text", body: "yeah give me a sec", payload: null, createdAt: new Date(Date.now() - 540_000).toISOString() },
+  { id: 3, sender: 301, recipient: 1, kind: "invite", body: "", payload: { game: DEMO_GAMES[0], placeId: 17625359962, gameId: "0f0e-11" }, createdAt: new Date(Date.now() - 60_000).toISOString() },
+];
+const chatGuard = () => {
+  if (!chatOn) throw { kind: "chat_signed_out", message: "You're not signed in to Vodka chat on this account." };
+};
 
 type Listener = (event: { payload: unknown }) => void;
 const listeners = new Map<string, Set<Listener>>();
@@ -244,6 +259,56 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       if (!a) throw { kind: "not_signed_in", message: "You're not signed in to Roblox." };
       return launch(DEMO_GAMES[0], a);
     }
+    case "chat_enabled":
+      return chatOn;
+    case "chat_start_verify":
+      await wait(300);
+      return { challenge: "vodka breeze saffron bridge cloud copper" };
+    case "chat_finish_verify":
+      await wait(600);
+      chatOn = true;
+      return { me: { robloxId: 1, name: "frostbyte", displayName: "Frostbyte", code: "VDK-FRST-BY73" } };
+    case "chat_sync":
+      chatGuard();
+      return {
+        me: { robloxId: 1, name: "frostbyte", displayName: "Frostbyte", code: "VDK-FRST-BY73" },
+        contacts: chatContacts,
+        blocked: [],
+        messages: chatMessages.filter((m) => m.id > (args.since as number)),
+      };
+    case "chat_add_contact": {
+      chatGuard();
+      if (!/^VDK-[A-Z2-9]{4}-[A-Z2-9]{4}$/i.test(String(args.code).trim())) throw { kind: "chat", message: "Vodka codes look like VDK-ABCD-2345." };
+      const contact = { robloxId: 300 + chatContacts.length + 5, name: "new_friend", displayName: "New Friend", online: true };
+      chatContacts = [...chatContacts, contact];
+      return { contact };
+    }
+    case "chat_remove_contact":
+    case "chat_block":
+      chatContacts = chatContacts.filter((c) => c.robloxId !== args.userId);
+      return { ok: true };
+    case "chat_report":
+      return { ok: true };
+    case "chat_send":
+    case "chat_invite": {
+      chatGuard();
+      if (cmd === "chat_invite" && !instances.some((i) => i.accountId === active()?.id)) throw { kind: "chat", message: "Start a game first, then invite people to it." };
+      const message: ChatMessage = {
+        id: ++chatId,
+        sender: 1,
+        recipient: args.to as number,
+        kind: cmd === "chat_invite" ? "invite" : "text",
+        body: cmd === "chat_invite" ? "" : String(args.body).trim(),
+        payload: cmd === "chat_invite" ? { game: DEMO_GAMES[0], placeId: 17625359962, gameId: "0f0e-11" } : null,
+        createdAt: new Date().toISOString(),
+      };
+      chatMessages = [...chatMessages, message];
+      return { message };
+    }
+    case "chat_sign_out":
+    case "chat_delete_account":
+      chatOn = false;
+      return null;
     case "list_instances":
       return instances.map((i) => ({
         ...i,

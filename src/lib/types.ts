@@ -43,6 +43,45 @@ export interface FriendLocation {
   gameId: string;
 }
 
+export interface ChatMe {
+  robloxId: number;
+  name: string;
+  displayName: string;
+  /** The code to give people so they can add you. */
+  code: string;
+}
+
+export interface ChatContact {
+  robloxId: number;
+  name: string;
+  displayName: string;
+  online: boolean;
+}
+
+export interface ChatInvite {
+  game: Game;
+  placeId: number;
+  /** The exact server, when the sender's game shares it. */
+  gameId: string | null;
+}
+
+export interface ChatMessage {
+  id: number;
+  sender: number;
+  recipient: number;
+  kind: "text" | "invite";
+  body: string;
+  payload: ChatInvite | null;
+  createdAt: string;
+}
+
+export interface ChatSync {
+  me: ChatMe;
+  contacts: ChatContact[];
+  blocked: number[];
+  messages: ChatMessage[];
+}
+
 export interface Chart {
   name: string;
   games: Game[];
@@ -167,6 +206,8 @@ export type ErrorKind =
   | "api"
   | "keyring"
   | "blocked_url"
+  | "chat"
+  | "chat_signed_out"
   | "other";
 
 export interface AppError {

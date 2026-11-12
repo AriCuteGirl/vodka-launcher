@@ -393,4 +393,6 @@ export async function boot() {
     app.bootError = toAppError(e);
   }
   app.booted = true;
+  // Imported here, not at the top: the chat module itself imports this one.
+  void import("./chat.svelte").then((m) => m.startChat());
 }
