@@ -44,6 +44,8 @@ struct Instance {
     fps: Option<f64>,
     env: Vec<(&'static str, String)>,
     uri: String,
+    /// Held for as long as the game runs; dropping it frees the slot and the account for other windows.
+    _claim: slots::Claim,
 }
 
 #[derive(Default)]
@@ -159,38 +161,38 @@ pub async fn launch(
     uri: String,
     env: Vec<(&'static str, String)>,
 ) -> Result<u32> {
+    // A quick answer for the common case; the lock files below are what actually decides.
     let used: Vec<(usize, u64)> = manager.lock().unwrap().instances.iter().map(|i| (i.slot, i.account.id)).collect();
-    let likely_slot = pick_slot(&used, account.id, &account.display_name)?;
+    pick_slot(&used, account.id, &account.display_name)?;
 
     let account_id = account.id;
-    let (cookie, profile) = tauri::async_runtime::spawn_blocking(move || -> Result<(String, ProfilePaths)> {
+    let account_name = account.display_name.clone();
+    let (cookie, profile, claim) = tauri::async_runtime::spawn_blocking(move || -> Result<(String, ProfilePaths, slots::Claim)> {
         let cookie = accounts::load_session(account_id)?.ok_or(AppError::NotSignedIn)?;
         let data = flatpak_data()?;
+        // Claimed through lock files, so a second Vodka window can't pick the same slot or account.
+        let claim = slots::claim(&slots::lock_dir(), account_id).map_err(|e| match e {
+            slots::ClaimError::AccountBusy => AppError::Launch(format!(
+                "{account_name} is already in a game, maybe from another Vodka window. Close it, or switch to another account."
+            )),
+            slots::ClaimError::Full => AppError::Launch(format!("Vodka runs at most {} games at once. Close one first.", slots::MAX_INSTANCES)),
+            slots::ClaimError::Io(e) => AppError::Launch(format!("could not reserve a game slot: {e}")),
+        })?;
         let profile = profiles::profile_paths(&data, account_id);
         profiles::prepare(&data.join("mocktail"), &profile)
             .map_err(|e| AppError::Launch(format!("could not prepare this account's profile: {e}")))?;
-        // Games beyond the second need their own copy of Mocktail's binary. Prepare every
-        // copy up to this slot, so a slot freed by another game is ready too.
-        if slots::needs_copy(likely_slot) {
-            let installed = installed_binary()?;
-            for slot in (0..=likely_slot).filter(|s| slots::needs_copy(*s)) {
-                slots::prepare(&installed, &slots::slot_dir(&data, slot))
-                    .map_err(|e| AppError::Launch(format!("could not prepare another copy of Mocktail: {e}")))?;
-            }
+        // Games beyond the second run from their own copy of Mocktail's binary.
+        if slots::needs_copy(claim.slot) {
+            slots::prepare(&installed_binary()?, &slots::slot_dir(&data, claim.slot))
+                .map_err(|e| AppError::Launch(format!("could not prepare another copy of Mocktail: {e}")))?;
         }
-        Ok((cookie, profile))
+        Ok((cookie, profile, claim))
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
 
-    // Re-check under the lock: another launch may have taken the slot meanwhile.
     let mut m = manager.lock().unwrap();
-    let used: Vec<(usize, u64)> = m.instances.iter().map(|i| (i.slot, i.account.id)).collect();
-    // Never above the slot whose copy was prepared; lower slots are prepared too.
-    let slot = pick_slot(&used, account.id, &account.display_name)?.min(likely_slot);
-    if used.iter().any(|(s, _)| *s == slot) {
-        return Err(AppError::Launch("another game took that slot. Press Play again.".into()));
-    }
+    let slot = claim.slot;
 
     let mut cmd = Command::new("flatpak");
     cmd.arg("run");
@@ -230,6 +232,7 @@ pub async fn launch(
         fps: None,
         env,
         uri,
+        _claim: claim,
     });
     drop(m);
 

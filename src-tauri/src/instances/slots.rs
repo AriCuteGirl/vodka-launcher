@@ -5,12 +5,57 @@
 //! binary inside the Flatpak's data folder, laid out the way Mocktail expects
 //! (`bin/mocktail`, with `lib/mocktail` and `share` pointing back at the real install).
 
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
 /// More than this is refused: every game needs about 1.5 GB of memory.
 pub const MAX_INSTANCES: usize = 10;
 const BUILT_IN: [Option<&str>; 2] = [None, Some("/app/lib/mocktail/mocktail")];
+
+/// A running game's hold on its slot and its account. Other Vodka windows see both as taken
+/// until this is dropped (or this Vodka exits: the operating system releases file locks itself).
+#[derive(Debug)]
+pub struct Claim {
+    pub slot: usize,
+    _slot_lock: File,
+    _account_lock: File,
+}
+
+#[derive(Debug)]
+pub enum ClaimError {
+    /// That account already has a game, in this window or another.
+    AccountBusy,
+    /// Every slot is in use.
+    Full,
+    Io(io::Error),
+}
+
+/// Where the lock files live: the user's runtime folder, which is cleared at logout.
+pub fn lock_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("vodka-launcher")
+}
+
+fn try_lock(path: &Path) -> io::Result<Option<File>> {
+    let file = OpenOptions::new().create(true).truncate(false).write(true).open(path)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(e),
+    }
+}
+
+/// Reserves the account and the lowest free slot, across every Vodka window of this user.
+pub fn claim(dir: &Path, account_id: u64) -> Result<Claim, ClaimError> {
+    std::fs::create_dir_all(dir).map_err(ClaimError::Io)?;
+    let account = try_lock(&dir.join(format!("account-{account_id}.lock"))).map_err(ClaimError::Io)?.ok_or(ClaimError::AccountBusy)?;
+    for slot in 0..MAX_INSTANCES {
+        if let Some(lock) = try_lock(&dir.join(format!("slot-{slot}.lock"))).map_err(ClaimError::Io)? {
+            return Ok(Claim { slot, _slot_lock: lock, _account_lock: account });
+        }
+    }
+    Err(ClaimError::Full)
+}
 
 pub fn slot_dir(flatpak_data: &Path, slot: usize) -> PathBuf {
     flatpak_data.join("vodka/slots").join(slot.to_string())
@@ -71,6 +116,37 @@ mod tests {
         assert_eq!(commands[0], None);
         assert_eq!(commands[2].as_deref(), Some("/d/vodka/slots/2/bin/mocktail"));
         assert!(!needs_copy(1) && needs_copy(2));
+    }
+
+    #[test]
+    fn claims_are_exclusive_and_freed_when_a_game_ends() {
+        let dir = std::env::temp_dir().join(format!("vodka-claims-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Each claim opens its own file handles, exactly as a second Vodka window would.
+        let first = claim(&dir, 1).unwrap();
+        assert_eq!(first.slot, 0);
+        assert!(matches!(claim(&dir, 1), Err(ClaimError::AccountBusy)));
+        let second = claim(&dir, 2).unwrap();
+        assert_eq!(second.slot, 1);
+        // The first game closes: its slot and account are free again, the other is untouched.
+        drop(first);
+        let third = claim(&dir, 3).unwrap();
+        assert_eq!(third.slot, 0);
+        assert!(claim(&dir, 1).is_ok());
+        assert!(matches!(claim(&dir, 2), Err(ClaimError::AccountBusy)));
+        drop((second, third));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn there_are_only_so_many_slots() {
+        let dir = std::env::temp_dir().join(format!("vodka-claims-full-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let held: Vec<Claim> = (0..MAX_INSTANCES as u64).map(|id| claim(&dir, id + 1).unwrap()).collect();
+        assert_eq!(held.iter().map(|c| c.slot).collect::<Vec<_>>(), (0..MAX_INSTANCES).collect::<Vec<_>>());
+        assert!(matches!(claim(&dir, 99), Err(ClaimError::Full)));
+        drop(held);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

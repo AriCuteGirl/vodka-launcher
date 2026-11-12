@@ -22,6 +22,8 @@ export const chat = $state({
   partyLastId: 0,
   partyInvites: [] as PartyInvite[],
   partyUnread: 0,
+  /** Members: start the game the leader starts, without asking. Remembered on this computer. */
+  follow: typeof localStorage === "undefined" || localStorage.getItem("vodka-party-follow") !== "off",
   /** True while the Chat page is on screen (faster refresh, no toasts). */
   visible: false,
   unreadTotal: 0,
@@ -124,6 +126,7 @@ export async function syncChat() {
     }
     if (chat.visible && typeof chat.open === "number") markSeen(chat.open);
     await syncParty(accountId);
+    await announceMyGame();
     recount();
   } catch (e) {
     const error = toAppError(e);
@@ -180,11 +183,54 @@ async function syncParty(accountId: number) {
     chat.partyLastId = Math.max(chat.partyLastId, ...data.events.map((e) => e.id));
     const watching = chat.visible && chat.open === "party";
     for (const e of fresh) {
-      if (first || watching || e.sender === me || e.kind === "system") continue;
-      chat.partyUnread++;
+      if (first || e.sender === me || e.kind === "system") continue;
+      if (watching && e.kind !== "launch") continue;
       const who = data.party.members.find((m) => m.robloxId === e.sender)?.displayName ?? "Someone";
-      toast(e.kind === "launch" ? `${who} is calling the party into ${e.payload?.game.name ?? "a game"}. Open Chat to join.` : `Party · ${who}: ${e.body.slice(0, 80)}`);
+      if (e.kind === "launch" && e.payload) {
+        // Follow the leader straight in, unless this account is already playing something.
+        const busy = app.instances.some((i) => i.accountId === me);
+        if (chat.follow && e.sender === data.party.leader && !busy) {
+          toast(`Following ${who} into ${e.payload.game.name}.`, "ok");
+          acceptInvite(e.payload);
+          continue;
+        }
+        chat.partyUnread++;
+        toast(`${who} is taking the party into ${e.payload.game.name}. Open Chat to join.`);
+      } else {
+        chat.partyUnread++;
+        toast(`Party · ${who}: ${e.body.slice(0, 80)}`);
+      }
     }
+  }
+}
+
+export function setFollow(on: boolean) {
+  chat.follow = on;
+  try {
+    localStorage.setItem("vodka-party-follow", on ? "on" : "off");
+  } catch {
+    // It just won't be remembered.
+  }
+}
+
+/** Games this window already told the party about, as "instance:universe". */
+const announced = new Set<string>();
+
+/** As party leader, tell the party whenever my game is up (or I switched to another one inside Roblox). */
+async function announceMyGame() {
+  const me = chat.me?.robloxId;
+  if (!chat.party || me == null || chat.party.leader !== me || chat.party.members.length < 2) return;
+  const mine = app.instances.find((i) => i.accountId === me && i.phase === "playing");
+  // A few seconds after it appears, Roblox knows which server it is.
+  if (!mine || Date.now() - mine.startedAtMs < 6000) return;
+  const key = `${mine.id}:${mine.game.universeId}`;
+  if (announced.has(key)) return;
+  announced.add(key);
+  try {
+    await api.party("launch");
+  } catch {
+    // Let the next round try again.
+    announced.delete(key);
   }
 }
 
@@ -215,7 +261,8 @@ export function startChat() {
   setInterval(() => {
     ticks++;
     // Every 4 s while the Chat page is open, every 20 s otherwise, and not at all while chat is off.
-    const due = chat.visible ? true : ticks % 5 === 0;
+    // Every round while the Chat page is open or a party is on (so following the leader is quick).
+    const due = chat.visible || chat.party ? true : ticks % 5 === 0;
     if (due && app.account && app.online && (chat.status === "on" || chat.status === "unknown" || app.account.id !== chat.accountId)) void syncChat();
   }, 4000);
   void syncChat();

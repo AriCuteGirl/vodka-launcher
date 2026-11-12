@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { acceptInvite, chat, markSeen, partyDo, seeParty, sendInvite, sendText, syncChat, unreadFor } from "$lib/chat.svelte";
+  import { acceptInvite, chat, markSeen, partyDo, seeParty, sendInvite, sendText, setFollow, syncChat, unreadFor } from "$lib/chat.svelte";
   import Avatar from "$lib/components/Avatar.svelte";
   import Button from "$lib/components/Button.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -300,6 +300,13 @@
               </select>
             {/if}
           </div>
+          <p class="followline">
+            {#if leading}
+              When you start a game, everyone in the party who has following on comes with you. No button needed.
+            {:else}
+              <label><input type="checkbox" checked={chat.follow} onchange={(e) => setFollow(e.currentTarget.checked)} /> Follow the leader into games automatically</label>
+            {/if}
+          </p>
           <div class="messages" bind:this={partyThread} aria-live="polite">
             {#each chat.partyEvents as e (e.id)}
               {#if e.kind === "system"}
@@ -737,6 +744,25 @@
   }
   .members option {
     background: #141b24;
+  }
+  .followline {
+    padding: 6px var(--s-4);
+    border-bottom: 1px solid var(--line);
+    font-size: var(--fs-xs);
+    color: var(--text-1);
+  }
+  .followline label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+    cursor: pointer;
+  }
+  .followline input {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    flex: none;
+    accent-color: var(--frost-strong);
   }
   .sys {
     align-self: center;
