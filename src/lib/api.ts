@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { Account, AppError, Chart, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { Account, AppError, AvatarView, Chart, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -45,6 +45,11 @@ export const api = {
   listFriendRequests: () => call<Person[]>("list_friend_requests"),
   answerFriendRequest: (userId: number, accept: boolean) => call<void>("answer_friend_request", { userId, accept }),
   joinFriend: (userId: number) => call<number>("join_friend", { userId }),
+  refreshInstanceGames: () => call<boolean>("refresh_instance_games"),
+  avatar: () => call<AvatarView>("avatar"),
+  avatarPicture: () => call<string | null>("avatar_picture"),
+  wearOutfit: (outfitId: number) => call<string[]>("wear_outfit", { outfitId }),
+  headshots: (userIds: number[]) => call<Record<string, string>>("headshots", { userIds }),
   listInstances: () => call<Instance[]>("list_instances"),
   stopInstance: (id: number, restart: boolean) => call<void>("stop_instance", { id, restart }),
   getSettings: () => call<Settings>("get_settings"),

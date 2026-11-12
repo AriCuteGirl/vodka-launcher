@@ -374,6 +374,18 @@ pub fn list(manager: &SharedManager) -> Vec<InstanceView> {
         .collect()
 }
 
+/// (instance id, account id, universe id) of every running game, for checking where each account really is.
+pub fn running_games(manager: &SharedManager) -> Vec<(u32, u64, u64)> {
+    manager.lock().unwrap().instances.iter().map(|i| (i.id, i.account.id, i.game.universe_id)).collect()
+}
+
+/// Records that an instance is now in a different game (the player switched inside Roblox).
+pub fn set_game(manager: &SharedManager, id: u32, game: Game) {
+    if let Some(inst) = manager.lock().unwrap().instances.iter_mut().find(|i| i.id == id) {
+        inst.game = game;
+    }
+}
+
 pub fn running_account_ids(manager: &SharedManager) -> Vec<u64> {
     manager.lock().unwrap().instances.iter().map(|i| i.account.id).collect()
 }

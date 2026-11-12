@@ -7,6 +7,7 @@
     { href: "/", label: "Home", icon: "home" },
     { href: "/games", label: "Games", icon: "games" },
     { href: "/players", label: "Players", icon: "players" },
+    { href: "/avatar", label: "Avatar", icon: "avatar" },
     { href: "/marketplace", label: "Marketplace", icon: "market" },
     { href: "/friends", label: "Friends", icon: "friends" },
     { href: "/chat", label: "Chat", icon: "chat" },

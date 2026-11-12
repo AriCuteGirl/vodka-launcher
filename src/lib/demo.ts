@@ -309,6 +309,22 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "chat_delete_account":
       chatOn = false;
       return null;
+    case "refresh_instance_games":
+      return false;
+    case "avatar":
+      await wait(400);
+      if (s in ERRORS) throw ERRORS[s];
+      return {
+        pictureUrl: null,
+        outfits: s === "empty" ? [] : ["Winter fit", "Bacon classic", "Beach day", "All black", "Pastel", "Knight"].map((name, i) => ({ id: i + 1, name, imageUrl: null })),
+      };
+    case "avatar_picture":
+      return null;
+    case "wear_outfit":
+      await wait(700);
+      return [];
+    case "headshots":
+      return {};
     case "list_instances":
       return instances.map((i) => ({
         ...i,

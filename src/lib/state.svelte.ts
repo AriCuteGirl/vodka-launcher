@@ -382,6 +382,15 @@ export async function boot() {
   });
   // Friends come and go; once a minute keeps the rail fresh without leaning on Roblox.
   setInterval(() => app.account && app.online && void refreshFriends(true), 60_000);
+  // You can switch games inside Roblox; ask where each playing account really is now and then.
+  setInterval(async () => {
+    if (app.instances.length === 0 || !app.online) return;
+    try {
+      if (await api.refreshInstanceGames()) await refreshInstances();
+    } catch {
+      // Not worth a message; the next round will try again.
+    }
+  }, 30_000);
   // CPU and memory only change while something runs.
   setInterval(() => app.instances.length > 0 && void refreshInstances(), 2000);
   try {

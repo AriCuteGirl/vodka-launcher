@@ -19,6 +19,7 @@
     settings: "Settings",
     gallery: "Design system",
     chat: "Chat",
+    avatar: "Avatar",
   };
   const crumb = $derived(TITLES[page.url.pathname.split("/")[1] ?? ""] ?? "Home");
 

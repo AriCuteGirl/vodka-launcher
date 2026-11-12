@@ -3,7 +3,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Chart, Game, Person, Presence, PrivateServer, Server, User};
+pub use parse::{Chart, Game, Outfit, Person, Presence, PrivateServer, Server, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -226,6 +226,51 @@ impl Client {
         // The friends list just changed.
         self.cache.lock().unwrap().retain(|key, _| !key.contains("/friends"));
         Ok(())
+    }
+
+    /// The account's saved outfits, with pictures.
+    pub async fn outfits(&self, cookie: &str, user_id: u64) -> Result<Vec<Outfit>> {
+        let url = format!("https://avatar.roblox.com/v2/avatar/users/{user_id}/outfits?page=1&itemsPerPage=50&isEditable=true");
+        let mut list = parse::outfits(&self.send(&url, None, Some(cookie)).await?)?;
+        let ids: Vec<u64> = list.iter().map(|o| o.id).collect();
+        let mut pictures = HashMap::new();
+        for batch in ids.chunks(ICON_BATCH) {
+            let url = format!(
+                "https://thumbnails.roblox.com/v1/users/outfits?userOutfitIds={}&size=150x150&format=Png&isCircular=false",
+                join_ids(batch)
+            );
+            // Pictures are extras; the list is still usable by name.
+            if let Ok(body) = self.get(&url, None, THUMB_TTL).await {
+                pictures.extend(parse::thumbnails(&body).unwrap_or_default());
+            }
+        }
+        for o in &mut list {
+            o.image_url = pictures.get(&o.id).cloned();
+        }
+        Ok(list)
+    }
+
+    /// The account's current full-body picture. Never cached, so a change shows as soon as Roblox has redrawn it.
+    pub async fn avatar_picture(&self, user_id: u64) -> Result<Option<String>> {
+        let url = format!("https://thumbnails.roblox.com/v1/users/avatar?userIds={user_id}&size=420x420&format=Png&isCircular=false");
+        Ok(parse::thumbnails(&self.send(&url, None, None).await?)?.remove(&user_id))
+    }
+
+    /// Puts a saved outfit on. Returns the parts Roblox refused, if any (empty means everything applied).
+    /// Only ever called from a button the user pressed.
+    pub async fn wear_outfit(&self, cookie: &str, outfit_id: u64) -> Result<Vec<String>> {
+        let details = self.send(&format!("https://avatar.roblox.com/v3/outfits/{outfit_id}/details"), None, Some(cookie)).await?;
+        let mut failed = Vec::new();
+        for (what, path, body) in parse::wear_requests(&details)? {
+            match self.send(&format!("https://avatar.roblox.com{path}"), Some(&body), Some(cookie)).await {
+                Ok(_) => {}
+                // Without the items nothing useful happened: report that as the error.
+                Err(e) if what == "items" => return Err(e),
+                Err(AppError::SessionExpired) => return Err(AppError::SessionExpired),
+                Err(_) => failed.push(what.to_owned()),
+            }
+        }
+        Ok(failed)
     }
 
     /// Public servers of a place that still have room, emptiest first. Not cached: counts change by the second.

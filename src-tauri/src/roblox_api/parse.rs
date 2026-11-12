@@ -113,6 +113,59 @@ pub fn thumbnails(body: &str) -> Result<HashMap<u64, String>> {
         .collect())
 }
 
+/// A saved avatar outfit.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Outfit {
+    pub id: u64,
+    pub name: String,
+    pub image_url: Option<String>,
+}
+
+pub fn outfits(body: &str) -> Result<Vec<Outfit>> {
+    #[derive(Deserialize)]
+    struct Raw {
+        id: u64,
+        name: Option<String>,
+    }
+    let page: Page<Raw> = serde_json::from_str(body).map_err(|e| bad("outfits", e))?;
+    Ok(page
+        .data
+        .into_iter()
+        .map(|o| Outfit { id: o.id, name: o.name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Outfit".into()), image_url: None })
+        .collect())
+}
+
+/// The avatar-API requests that put an outfit on: (what it changes, path, body).
+/// Built from the outfit's details so nothing but that outfit's own values is sent.
+pub fn wear_requests(details: &str) -> Result<Vec<(&'static str, &'static str, serde_json::Value)>> {
+    let d: serde_json::Value = serde_json::from_str(details).map_err(|e| bad("outfit", e))?;
+    let assets = d.get("assets").and_then(|a| a.as_array()).ok_or_else(|| bad("outfit", "no assets"))?;
+    let wearing: Vec<serde_json::Value> = assets
+        .iter()
+        .filter_map(|a| {
+            let id = a.get("id")?.as_u64()?;
+            let mut item = serde_json::json!({ "id": id });
+            // Layered clothing carries its layer order here.
+            if let Some(meta) = a.get("meta").filter(|m| m.is_object()) {
+                item["meta"] = meta.clone();
+            }
+            Some(item)
+        })
+        .collect();
+    let mut requests = vec![("items", "/v2/avatar/set-wearing-assets", serde_json::json!({ "assets": wearing }))];
+    if let Some(colors) = d.get("bodyColor3s").filter(|c| c.is_object()) {
+        requests.push(("body colors", "/v2/avatar/set-body-colors", colors.clone()));
+    }
+    if let Some(scale) = d.get("scale").filter(|c| c.is_object()) {
+        requests.push(("body scale", "/v1/avatar/set-scales", scale.clone()));
+    }
+    if let Some(kind) = d.get("playerAvatarType").and_then(|k| k.as_str()).filter(|k| matches!(*k, "R6" | "R15")) {
+        requests.push(("rig type", "/v1/avatar/set-player-avatar-type", serde_json::json!({ "playerAvatarType": kind })));
+    }
+    Ok(requests)
+}
+
 /// A public server of a game.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -498,6 +551,33 @@ mod tests {
     fn finds_the_continue_row() {
         assert_eq!(continue_universe_ids(OMNI).unwrap(), vec![6035872082, 994732206]);
         assert!(continue_universe_ids(r#"{"sorts":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn outfits_keep_their_ids_and_get_a_name() {
+        // Field names captured live on 2026-11-12.
+        let list = outfits(r#"{"data":[{"id":7,"name":"Winter","isEditable":true,"outfitType":"Avatar"},{"id":8,"name":"","isEditable":true}],"paginationToken":"x"}"#).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!((list[0].id, list[0].name.as_str()), (7, "Winter"));
+        assert_eq!(list[1].name, "Outfit");
+    }
+
+    #[test]
+    fn wearing_an_outfit_sends_only_that_outfits_values() {
+        let details = r#"{"id":7,"name":"Winter",
+            "assets":[{"id":11,"name":"Hat","assetType":{"id":8,"name":"Hat"},"currentVersionId":1},
+                      {"id":12,"name":"Jacket","assetType":{"id":67},"meta":{"order":11,"version":1}}],
+            "bodyColor3s":{"headColor3":"FFCC99","torsoColor3":"FFCC99"},
+            "scale":{"height":1.0,"width":1.0,"head":1.0,"depth":1.0,"proportion":0.0,"bodyType":0.0},
+            "playerAvatarType":"R15","outfitType":"Avatar"}"#;
+        let reqs = wear_requests(details).unwrap();
+        assert_eq!(reqs.iter().map(|r| r.1).collect::<Vec<_>>(), vec![
+            "/v2/avatar/set-wearing-assets", "/v2/avatar/set-body-colors", "/v1/avatar/set-scales", "/v1/avatar/set-player-avatar-type"]);
+        assert_eq!(reqs[0].2, serde_json::json!({"assets":[{"id":11},{"id":12,"meta":{"order":11,"version":1}}]}));
+        assert_eq!(reqs[3].2, serde_json::json!({"playerAvatarType":"R15"}));
+        // An outfit without colours or scale only changes the items.
+        assert_eq!(wear_requests(r#"{"assets":[],"playerAvatarType":"Weird"}"#).unwrap().len(), 1);
+        assert!(wear_requests(r#"{"name":"no assets"}"#).is_err());
     }
 
     #[test]

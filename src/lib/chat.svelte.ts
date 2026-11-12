@@ -20,6 +20,8 @@ export const chat = $state({
   /** True while the Chat page is on screen (faster refresh, no toasts). */
   visible: false,
   unreadTotal: 0,
+  /** Roblox profile pictures by user id, looked up from Roblox (the chat server only knows names). */
+  pictures: {} as Record<string, string>,
 });
 
 const seenKey = (accountId: number) => `vodka-chat-seen:${accountId}`;
@@ -91,6 +93,10 @@ export async function syncChat() {
     chat.error = null;
     chat.me = data.me;
     chat.contacts = data.contacts;
+    const missing = data.contacts.map((c) => c.robloxId).filter((id) => !(String(id) in chat.pictures));
+    if (missing.length) {
+      void api.headshots(missing).then((found) => (chat.pictures = { ...chat.pictures, ...found })).catch(() => {});
+    }
     if (data.messages.length) {
       const known = new Set(chat.messages.map((m) => m.id));
       const fresh = data.messages.filter((m) => !known.has(m.id));

@@ -82,6 +82,17 @@ export interface ChatSync {
   messages: ChatMessage[];
 }
 
+export interface Outfit {
+  id: number;
+  name: string;
+  imageUrl: string | null;
+}
+
+export interface AvatarView {
+  pictureUrl: string | null;
+  outfits: Outfit[];
+}
+
 export interface Chart {
   name: string;
   games: Game[];

@@ -10,7 +10,7 @@ mod tweaks;
 use error::{AppError, Result};
 use instances::{InstanceView, SharedManager};
 use mocktail::detect::MocktailStatus;
-use roblox_api::{Chart, Game, Person, Presence, User};
+use roblox_api::{Chart, Game, Outfit, Person, Presence, User};
 use serde::{Deserialize, Serialize};
 use settings::{SavedAccount, Settings};
 use std::path::PathBuf;
@@ -359,6 +359,63 @@ async fn join_friend(app: AppHandle, state: State<'_, AppState>, user_id: u64) -
     instances::launch(app, state.instances.clone(), account, at.game, uri, env).await
 }
 
+/// Players can switch games inside Roblox without Vodka knowing. This asks Roblox where each
+/// playing account really is and corrects the game shown for it. Returns whether anything changed.
+#[tauri::command]
+async fn refresh_instance_games(app: AppHandle, state: State<'_, AppState>) -> Result<bool> {
+    let mut changed = false;
+    for (instance_id, account_id, universe_id) in instances::running_games(&state.instances) {
+        let Some(here) = own_presence(&app, &state.api, account_id).await else { continue };
+        let (Some(now_universe), Some(place)) = (here.universe_id, here.root_place_id.or(here.place_id)) else { continue };
+        if here.kind != "in_game" || now_universe == universe_id {
+            continue;
+        }
+        let name = here.location.clone().unwrap_or_else(|| "A game".into());
+        let game = state.api.game_for(now_universe, place, &name).await;
+        instances::set_game(&state.instances, instance_id, game);
+        changed = true;
+    }
+    Ok(changed)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AvatarView {
+    picture_url: Option<String>,
+    outfits: Vec<Outfit>,
+}
+
+/// The active account's current look and saved outfits.
+#[tauri::command]
+async fn avatar(app: AppHandle, state: State<'_, AppState>) -> Result<AvatarView> {
+    let (account, cookie) = active_cookie(&app).await?;
+    let outfits = state.api.outfits(&cookie, account.id).await?;
+    let picture_url = state.api.avatar_picture(account.id).await.unwrap_or(None);
+    Ok(AvatarView { picture_url, outfits })
+}
+
+/// Profile pictures for any Roblox users (public data), keyed by user id.
+#[tauri::command]
+async fn headshots(state: State<'_, AppState>, user_ids: Vec<u64>) -> Result<std::collections::HashMap<u64, String>> {
+    if user_ids.len() > 200 {
+        return Err(AppError::Other("That's too many pictures to ask for at once.".into()));
+    }
+    state.api.headshots(&user_ids).await
+}
+
+#[tauri::command]
+async fn avatar_picture(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>> {
+    let account = active_account(&app)?.ok_or(AppError::NotSignedIn)?;
+    state.api.avatar_picture(account.id).await
+}
+
+/// Puts one of the active account's saved outfits on. Returns the parts Roblox refused.
+#[tauri::command]
+async fn wear_outfit(app: AppHandle, state: State<'_, AppState>, outfit_id: u64) -> Result<Vec<String>> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.wear_outfit(&cookie, outfit_id).await
+}
+
 #[tauri::command]
 async fn list_instances(state: State<'_, AppState>) -> Result<Vec<InstanceView>> {
     let manager = state.instances.clone();
@@ -583,6 +640,11 @@ pub fn run() {
             friend_location,
             list_servers,
             list_instances,
+            refresh_instance_games,
+            avatar,
+            avatar_picture,
+            headshots,
+            wear_outfit,
             stop_instance,
             get_settings,
             set_flags,

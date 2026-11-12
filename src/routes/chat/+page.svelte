@@ -208,7 +208,7 @@
               {@const unread = unreadFor(c.robloxId)}
               <li>
                 <button class:selected={chat.open === c.robloxId} onclick={() => (chat.open = c.robloxId)}>
-                  <Avatar name={c.displayName} size={32} status={c.online ? "online" : undefined} />
+                  <Avatar name={c.displayName} src={chat.pictures[String(c.robloxId)]} size={32} status={c.online ? "online" : undefined} />
                   <span class="who"><b>{c.displayName}</b><small>{c.online ? "On Vodka now" : "Away"}</small></span>
                   {#if unread}<i>{unread}</i>{/if}
                 </button>
@@ -227,7 +227,7 @@
           <div class="pick"><Icon name="chat" size={32} /><p class="muted">Pick someone on the left to start talking.</p></div>
         {:else}
           <header>
-            <Avatar name={peer.displayName} size={34} status={peer.online ? "online" : undefined} />
+            <Avatar name={peer.displayName} src={chat.pictures[String(peer.robloxId)]} size={34} status={peer.online ? "online" : undefined} />
             <div class="who"><b>{peer.displayName}</b><small>@{peer.name}</small></div>
             <Button size="sm" icon="games" disabled={!myInstance()} title={myInstance() ? "" : "Start a game first"} onclick={() => sendInvite(peer.robloxId)}>
               Invite to my game
