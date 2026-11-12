@@ -202,7 +202,7 @@ async fn prepare_launch(app: &AppHandle) -> Result<(SavedAccount, Vec<(&'static 
     }
     let saved = settings::load(&config_dir(app)?);
     let account = saved.active().cloned().ok_or(AppError::NotSignedIn)?;
-    let options = tweaks::effective(&saved.defaults, saved.account_options.get(&account.id));
+    let options = tweaks::modernize(tweaks::effective(&saved.defaults, saved.account_options.get(&account.id)));
     // Saved options were validated when they were saved; check again in case the file was edited by hand.
     let options = tweaks::validate(&options).map_err(AppError::Launch)?;
     Ok((account, tweaks::to_env(&options)))

@@ -24,7 +24,11 @@
   const inherit = $derived(scope == null ? "Mocktail's setting" : "Same as all accounts");
   const account = $derived(app.accounts.find((a) => a.id === scope) ?? null);
   const flagRows = $derived(Object.entries(draft.fflags).sort(([a], [b]) => a.localeCompare(b)));
-  const memoryTooLow = $derived(draft.memoryLimitMb != null && draft.memoryLimitMb !== 0 && draft.memoryLimitMb < 2048);
+  const MEMORY_PRESETS = [4096, 6144, 8192, 12288, 16384];
+  /** The preset to show for a saved value; older or hand-edited values round up to the next preset. */
+  const memoryChoice = $derived(
+    draft.memoryLimitMb == null ? "" : draft.memoryLimitMb === 0 ? "0" : String(MEMORY_PRESETS.find((mb) => mb >= draft.memoryLimitMb!) ?? MEMORY_PRESETS.at(-1)),
+  );
   const fpsChoice = $derived(draft.fps == null ? "" : draft.fps === "display" || draft.fps === "unlimited" ? draft.fps : "custom");
 
   function load(s: number | null) {
@@ -32,6 +36,12 @@
     const from = saved(s);
     draft = { ...NO_OPTIONS, ...from, fflags: { ...from.fflags } };
     dirty = false;
+    // A limit saved by an older Vodka may be lower than today's minimum: show the raised value and offer to save it.
+    const mb = draft.memoryLimitMb;
+    if (mb != null && mb !== 0 && !MEMORY_PRESETS.includes(mb)) {
+      draft.memoryLimitMb = MEMORY_PRESETS.find((p) => p >= mb) ?? MEMORY_PRESETS[MEMORY_PRESETS.length - 1];
+      dirty = true;
+    }
     error = null;
     flagError = null;
   }
@@ -189,21 +199,15 @@
       </select>
     </label>
     <label>
-      <span>Memory safety limit (MB, 0 = off)</span>
-      <input
-        type="number"
-        min="0"
-        step="512"
-        placeholder={inherit}
-        value={draft.memoryLimitMb ?? ""}
-        aria-invalid={memoryTooLow}
-        oninput={(e) => set("memoryLimitMb", e.currentTarget.value === "" ? null : Number(e.currentTarget.value))}
-      />
-      <small class:bad={memoryTooLow}>
-        {memoryTooLow
-          ? "Too low: Roblox needs about 1.5 GB. Use 0, or 2048 and up."
-          : "Doesn't make Roblox use less. Mocktail closes the game if it goes over."}
-      </small>
+      <span>Memory safety limit</span>
+      <select value={memoryChoice} onchange={(e) => set("memoryLimitMb", e.currentTarget.value === "" ? null : Number(e.currentTarget.value))}>
+        <option value="">{inherit}</option>
+        <option value="0">Off (recommended)</option>
+        {#each MEMORY_PRESETS as mb (mb)}
+          <option value={String(mb)}>{mb / 1024} GB</option>
+        {/each}
+      </select>
+      <small>Doesn't make Roblox use less. Mocktail closes the game if it goes over, so leave room for spikes.</small>
     </label>
     <label>
       <span>Roblox client updates</span>
@@ -277,7 +281,7 @@
     <span class="grow"></span>
     {#if dirty}<span class="faint">Unsaved changes</span>{/if}
     <Button disabled={!dirty} onclick={() => load(scope)}>Discard</Button>
-    <Button variant="primary" disabled={!dirty || memoryTooLow} busy={saving} onclick={save}>Save</Button>
+    <Button variant="primary" disabled={!dirty} busy={saving} onclick={save}>Save</Button>
   </div>
   {#if error}<p class="err" role="alert">{error}</p>{/if}
 </div>
@@ -348,9 +352,7 @@
     font-size: 0.6875rem;
     color: var(--text-2);
   }
-  label small.bad {
-    color: var(--danger);
-  }
+
   select,
   input,
   textarea {

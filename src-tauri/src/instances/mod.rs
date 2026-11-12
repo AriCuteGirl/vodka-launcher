@@ -257,6 +257,7 @@ pub async fn launch(
             Ok(st) => classify_exit(st.code(), &log),
             Err(e) => ExitReport { code: None, outcome: "crashed", detail: Some(e.to_string()) },
         };
+        let report = explain_kill(report, &inst.env);
         let _ = app.emit(
             "instances://exit",
             ExitEvent {
@@ -276,6 +277,21 @@ pub async fn launch(
         }
     });
     Ok(id)
+}
+
+/// With a memory limit set, the kernel may kill the game outright, leaving no message in the log.
+/// Say so, rather than showing a bare "stopped by a signal".
+fn explain_kill(mut report: ExitReport, env: &[(&'static str, String)]) -> ExitReport {
+    let limit = env.iter().find(|(k, _)| *k == "MOCKTAIL_MEMORY_LIMIT_MB").map(|(_, v)| v.as_str()).filter(|v| *v != "0");
+    let killed = report.outcome == "crashed" && matches!(report.code, None | Some(137));
+    if let (Some(mb), true) = (limit, killed) {
+        if !report.detail.as_deref().is_some_and(|d| d.contains("memory safety limit")) {
+            report.detail = Some(format!(
+                "The game was killed, most likely for going over its {mb} MB memory safety limit. Raise the limit or turn it off in Settings → Performance."
+            ));
+        }
+    }
+    report
 }
 
 type LaunchFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32>> + Send>>;
@@ -387,6 +403,17 @@ mod tests {
     fn further_games_take_the_next_free_slot() {
         assert_eq!(pick_slot(&[(0, 1), (1, 2)], 3, "C").unwrap(), 2);
         assert_eq!(pick_slot(&[(0, 1), (2, 3)], 4, "D").unwrap(), 1);
+    }
+
+    #[test]
+    fn a_kill_with_a_memory_limit_set_points_at_the_limit() {
+        let killed = ExitReport { code: None, outcome: "crashed", detail: Some("Mocktail was stopped by a signal.".into()) };
+        let with_limit = explain_kill(killed.clone(), &[("MOCKTAIL_MEMORY_LIMIT_MB", "4096".into())]);
+        assert!(with_limit.detail.unwrap().contains("4096 MB memory safety limit"));
+        assert_eq!(explain_kill(killed.clone(), &[("MOCKTAIL_MEMORY_LIMIT_MB", "0".into())]), killed);
+        assert_eq!(explain_kill(killed.clone(), &[]), killed);
+        let clean = ExitReport { code: Some(0), outcome: "closed", detail: None };
+        assert_eq!(explain_kill(clean.clone(), &[("MOCKTAIL_MEMORY_LIMIT_MB", "4096".into())]), clean);
     }
 
     #[test]

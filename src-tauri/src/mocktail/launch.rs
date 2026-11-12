@@ -55,6 +55,17 @@ pub fn classify_exit(code: Option<i32>, log: &[String]) -> ExitReport {
     if log.iter().any(|l| l.contains("sent website join to running Mocktail")) {
         return ExitReport { code, outcome: "forwarded", detail: None };
     }
+    // Mocktail's memory safety limit closing the game is a crash to the player, whatever the exit code.
+    if log.iter().any(|l| l.contains("[memory] limit exceeded")) {
+        return ExitReport {
+            code,
+            outcome: "crashed",
+            detail: Some(
+                "The game went over its memory safety limit, so Mocktail closed it. Raise the limit or turn it off in Settings → Performance."
+                    .into(),
+            ),
+        };
+    }
     if code == Some(0) {
         return ExitReport { code, outcome: "closed", detail: None };
     }
@@ -119,6 +130,16 @@ mod tests {
     fn forwarded_join_is_not_a_crash() {
         let log = vec!["  [launch] sent website join to running Mocktail".to_string()];
         assert_eq!(classify_exit(Some(0), &log).outcome, "forwarded");
+    }
+
+    #[test]
+    fn hitting_the_memory_limit_is_explained() {
+        let log = vec!["  [memory] limit exceeded: RSS+swap=2101 MiB, limit=2048 MiB; terminating".to_string()];
+        for code in [Some(0), Some(137), None] {
+            let r = classify_exit(code, &log);
+            assert_eq!(r.outcome, "crashed");
+            assert!(r.detail.unwrap().contains("memory safety limit"));
+        }
     }
 
     #[test]

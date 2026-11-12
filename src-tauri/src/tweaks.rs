@@ -9,9 +9,10 @@ pub const VSYNC: [&str; 3] = ["auto", "on", "off"];
 pub const PRESENT_MODES: [&str; 4] = ["auto", "fifo", "mailbox", "immediate"];
 pub const GAMEMODE: [&str; 3] = ["auto", "on", "off"];
 const MAX_FLAGS: usize = 200;
-/// Roblox itself needs about 1.5 GB. Mocktail closes the game when the cap is exceeded,
-/// so anything lower would end every session as it loads.
-pub const MIN_MEMORY_CAP_MB: u32 = 2048;
+/// Roblox sits around 1.5 GB and spikes well above 2 GB when a lot loads at once (a 2 GB
+/// limit closed a real session mid-trade). Mocktail closes the game when the limit is
+/// exceeded, so the lowest limit Vodka accepts leaves real headroom.
+pub const MIN_MEMORY_CAP_MB: u32 = 4096;
 /// Flags Vodka sets itself through the FPS option; editing them by hand would fight it.
 const MANAGED_FLAGS: [&str; 2] = ["DFIntTaskSchedulerTargetFps", "FFlagGameBasicSettingsFramerateCap5"];
 
@@ -100,7 +101,7 @@ pub fn validate(options: &LaunchOptions) -> Result<LaunchOptions, String> {
     if let Some(mb) = options.memory_limit_mb {
         if mb != 0 && !(MIN_MEMORY_CAP_MB..=262_144).contains(&mb) {
             return Err(format!(
-                "Memory cap must be 0 (off) or at least {MIN_MEMORY_CAP_MB} MB. Roblox needs about 1.5 GB, and Mocktail closes the game when the cap is exceeded."
+                "The memory limit must be off or at least {MIN_MEMORY_CAP_MB} MB. Roblox can spike past 2 GB, and Mocktail closes the game when the limit is exceeded."
             ));
         }
     }
@@ -134,6 +135,17 @@ pub fn effective(defaults: &LaunchOptions, account: Option<&LaunchOptions>) -> L
         hold_updates: a.hold_updates.or(defaults.hold_updates),
         fflags,
     }
+}
+
+/// Brings options saved by an older Vodka up to today's rules instead of refusing to launch:
+/// a memory limit that is now considered too low is raised to the minimum.
+pub fn modernize(mut options: LaunchOptions) -> LaunchOptions {
+    if let Some(mb) = options.memory_limit_mb {
+        if mb != 0 && mb < MIN_MEMORY_CAP_MB {
+            options.memory_limit_mb = Some(MIN_MEMORY_CAP_MB);
+        }
+    }
+    options
 }
 
 /// The environment variables Mocktail reads for these options. Unset options add nothing,
@@ -218,6 +230,7 @@ mod tests {
         assert!(validate(&LaunchOptions { present_mode: Some("mailbox".into()), ..base.clone() }).is_ok());
         assert!(validate(&LaunchOptions { memory_limit_mb: Some(600), ..base.clone() }).unwrap_err().contains("closes the game"));
         assert!(validate(&LaunchOptions { memory_limit_mb: Some(4096), ..base.clone() }).is_ok());
+        assert!(validate(&LaunchOptions { memory_limit_mb: Some(2048), ..base.clone() }).is_err());
         assert!(validate(&LaunchOptions { memory_limit_mb: Some(0), ..base.clone() }).is_ok());
         assert!(validate(&LaunchOptions { fflags: flags(&[("FFlagX", "maybe")]), ..base.clone() }).is_err());
         // Two spellings of one flag collapse into a duplicate.
@@ -244,6 +257,17 @@ mod tests {
         assert_eq!(e.vsync.as_deref(), Some("on"));
         assert_eq!(e.fflags, flags(&[("FFlagA", "True"), ("FIntB", "2")]));
         assert_eq!(effective(&defaults, None), defaults);
+    }
+
+    #[test]
+    fn an_old_too_low_memory_limit_is_raised_not_rejected() {
+        let old = LaunchOptions { memory_limit_mb: Some(2048), ..Default::default() };
+        assert_eq!(modernize(old).memory_limit_mb, Some(MIN_MEMORY_CAP_MB));
+        let off = LaunchOptions { memory_limit_mb: Some(0), ..Default::default() };
+        assert_eq!(modernize(off).memory_limit_mb, Some(0));
+        let high = LaunchOptions { memory_limit_mb: Some(8192), ..Default::default() };
+        assert_eq!(modernize(high).memory_limit_mb, Some(8192));
+        assert!(validate(&modernize(LaunchOptions { memory_limit_mb: Some(2048), ..Default::default() })).is_ok());
     }
 
     #[test]
