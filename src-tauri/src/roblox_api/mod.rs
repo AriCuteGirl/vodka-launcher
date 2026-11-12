@@ -3,7 +3,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Chart, Game, Person, Presence, User};
+pub use parse::{Chart, Game, Person, Presence, PrivateServer, Server, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -228,6 +228,18 @@ impl Client {
         Ok(())
     }
 
+    /// Public servers of a place that still have room, emptiest first. Not cached: counts change by the second.
+    pub async fn public_servers(&self, place_id: u64) -> Result<Vec<Server>> {
+        let url = format!("https://games.roblox.com/v1/games/{place_id}/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true");
+        parse::public_servers(&self.send(&url, None, None).await?)
+    }
+
+    /// Private servers of a place that this account can join.
+    pub async fn private_servers(&self, cookie: &str, place_id: u64) -> Result<Vec<PrivateServer>> {
+        let url = format!("https://games.roblox.com/v1/games/{place_id}/private-servers?limit=50&sortOrder=Desc");
+        parse::private_servers(&self.send(&url, None, Some(cookie)).await?)
+    }
+
     /// The game a presence points at, with its name and icon, for showing a join as a running game.
     pub async fn game_for(&self, universe_id: u64, place_id: u64, fallback_name: &str) -> Game {
         let url = format!("https://games.roblox.com/v1/games?universeIds={universe_id}");
@@ -349,6 +361,15 @@ mod tests {
         let games = Client::new().search("tower").await.unwrap();
         assert!(games.len() > 5);
         assert!(games.iter().filter(|g| g.icon_url.is_some()).count() > 3);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_public_servers_come_emptiest_first() {
+        let servers = Client::new().public_servers(17625359962).await.unwrap();
+        assert!(!servers.is_empty());
+        assert!(servers.windows(2).all(|w| w[0].playing <= w[1].playing));
+        assert!(servers.iter().all(|s| s.max_players > 0 && s.playing < s.max_players));
     }
 
     #[tokio::test]

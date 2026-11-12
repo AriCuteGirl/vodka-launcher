@@ -5,6 +5,9 @@
 Phase 4 (in progress): social.
 
 - Up to 10 games at once instead of 2: games beyond the second run from their own copy of Mocktail's binary. A five-second reminder shows each time another game is added.
+- Server picker on every game tile: let Roblox choose, fewest players, a specific public server, or a private server you can join.
+- Tick several accounts on Players and the next Play or Join starts for all of them, in the same server when one is chosen.
+- Memory safety limit is a preset list starting at 4 GB, and a game closed by the limit says so.
 - Games page: search all of Roblox and browse the public charts, with Play on every tile.
 - Friends page: friends grouped by what they are doing, a filter, friend requests with Accept and Decline, and Join for friends whose server is visible.
 - The right rail lists friends who are online.

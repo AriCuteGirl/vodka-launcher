@@ -1,6 +1,6 @@
 // App-wide reactive state. Components read `app.*` and call the functions below.
 import { api } from "./api";
-import { NO_OPTIONS, toAppError, type LaunchOptions, type Person, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, toAppError, type LaunchOptions, type Person, type Target, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type Settings, type User } from "./types";
 
 export interface Toast {
   id: number;
@@ -28,6 +28,10 @@ export const app = $state({
   crash: null as ExitEvent | null,
   /** A launch waiting for the user to accept the multi-instance warning. */
   pendingLaunch: null as { name: string; run: () => Promise<unknown> } | null,
+  /** Accounts ticked on the Players page; the next Play or Join starts for all of them. */
+  batch: [] as number[],
+  /** The server and account picker, when open. `target` is set when the server is already decided (joining a friend). */
+  launchDialog: null as { game: Game; target: Target | null; targetLabel: string | null } | null,
   friends: { status: "loading" } as Loadable<Person[]>,
   friendRequests: [] as Person[],
   signingIn: false,
@@ -150,6 +154,7 @@ export async function switchAccount(id: number) {
 }
 
 export async function removeAccount(id: number) {
+  app.batch = app.batch.filter((x) => x !== id);
   const name = app.accounts.find((a) => a.id === id)?.displayName ?? "Account";
   try {
     await api.removeAccount(id);
@@ -164,6 +169,7 @@ async function launch(run: () => Promise<unknown>) {
   try {
     await run();
     await refreshInstances();
+    await refreshAccounts();
   } catch (e) {
     const error = toAppError(e);
     if (error.kind === "mocktail_missing" || error.kind === "flatpak_missing") await refreshMocktail();
@@ -201,10 +207,72 @@ export async function answerFriendRequest(person: Person, accept: boolean) {
   await refreshFriends(true);
 }
 
-export const joinFriend = (friend: Person) =>
-  start(friend.presence.location ?? `${friend.displayName}'s game`, () => api.joinFriend(friend.id));
+export async function joinFriend(friend: Person) {
+  if (app.batch.length === 0) {
+    return start(friend.presence.location ?? `${friend.displayName}'s game`, () => api.joinFriend(friend.id));
+  }
+  // Several accounts: find the server once, then let the picker send them all there.
+  try {
+    const at = await api.friendLocation(friend.id);
+    app.launchDialog = { game: at.game, target: { kind: "server", placeId: at.placeId, gameId: at.gameId }, targetLabel: `${friend.displayName}'s server` };
+  } catch (e) {
+    fail(e);
+  }
+}
 
-export const play = (game: Game) => start(game.name, () => api.launchGame(game));
+/** Plays as the active account, or opens the picker when several accounts are ticked. */
+export function play(game: Game) {
+  if (app.batch.length > 0) return openLaunchDialog(game);
+  return start(game.name, () => api.launchGame(game));
+}
+
+export function openLaunchDialog(game: Game) {
+  app.launchDialog = { game, target: null, targetLabel: null };
+}
+
+export function toggleBatch(accountId: number) {
+  app.batch = app.batch.includes(accountId) ? app.batch.filter((id) => id !== accountId) : [...app.batch, accountId];
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Starts `game` for each of `accountIds`, one after another, all in the same server when `target` is given. */
+export async function launchMany(game: Game, accountIds: number[], target: Target | null) {
+  const busy = new Set(app.instances.map((i) => i.accountId));
+  const ids = accountIds.filter((id) => !busy.has(id));
+  const skipped = accountIds.length - ids.length;
+  if (skipped) toast(`${skipped} of those accounts ${skipped === 1 ? "is" : "are"} already in a game and ${skipped === 1 ? "was" : "were"} skipped.`);
+  if (ids.length === 0) return;
+  if (app.instances.length + ids.length > MAX_INSTANCES) {
+    toast(`That would be more than ${MAX_INSTANCES} games at once. Untick some accounts or close a game.`, "danger");
+    return;
+  }
+  const run = async () => {
+    let started = 0;
+    for (const id of ids) {
+      const name = app.accounts.find((a) => a.id === id)?.displayName ?? "An account";
+      try {
+        await api.launchGame(game, id, target);
+        started++;
+      } catch (e) {
+        toast(`${name}: ${toAppError(e).message}`, "danger");
+      }
+      await refreshInstances();
+      // Give each game a moment to claim its slot and profile before the next one starts.
+      if (id !== ids[ids.length - 1]) await pause(1500);
+    }
+    if (started > 1) toast(`Started ${game.name} for ${started} accounts.`, "ok");
+  };
+  const total = app.instances.length + ids.length;
+  if (total > 1 && !app.settings.multiInstanceAccepted) {
+    app.pendingLaunch = { name: `${game.name} for ${ids.length} account${ids.length === 1 ? "" : "s"}`, run };
+    return;
+  }
+  if (total > 1) {
+    toast(`Starting ${ids.length} game${ids.length === 1 ? "" : "s"} (${total} running in total). Together they need about ${(total * GAME_MEMORY_GB).toFixed(1)} GB of memory, and each one adds account risk.`, "danger", 5000);
+  }
+  await run();
+}
 
 /** Runs the checks every launch goes through, then starts it. */
 async function start(name: string, run: () => Promise<unknown>) {

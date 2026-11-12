@@ -113,6 +113,90 @@ pub fn thumbnails(body: &str) -> Result<HashMap<u64, String>> {
         .collect())
 }
 
+/// A public server of a game.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Server {
+    pub id: String,
+    pub playing: u32,
+    pub max_players: u32,
+    pub ping: Option<u32>,
+}
+
+/// A private server the signed-in account can join.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateServer {
+    pub name: String,
+    pub owner: Option<String>,
+    pub playing: u32,
+    pub max_players: u32,
+    pub access_code: String,
+}
+
+/// Private-server access codes are GUID-like. Anything else must never reach a launch link.
+pub fn valid_access_code(code: &str) -> bool {
+    (1..=128).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Public servers with room, emptiest first.
+pub fn public_servers(body: &str) -> Result<Vec<Server>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Raw {
+        id: String,
+        max_players: Option<u32>,
+        playing: Option<u32>,
+        ping: Option<u32>,
+    }
+    let page: Page<Raw> = serde_json::from_str(body).map_err(|e| bad("servers", e))?;
+    let mut servers: Vec<Server> = page
+        .data
+        .into_iter()
+        .filter(|s| valid_game_id(&s.id))
+        .map(|s| Server { id: s.id, playing: s.playing.unwrap_or(0), max_players: s.max_players.unwrap_or(0), ping: s.ping })
+        .filter(|s| s.max_players == 0 || s.playing < s.max_players)
+        .collect();
+    servers.sort_by_key(|s| s.playing);
+    Ok(servers)
+}
+
+/// Private servers that come with an access code (the ones this account may join).
+pub fn private_servers(body: &str) -> Result<Vec<PrivateServer>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Owner {
+        display_name: Option<String>,
+        name: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Raw {
+        name: Option<String>,
+        access_code: Option<String>,
+        max_players: Option<u32>,
+        playing: Option<u32>,
+        #[serde(default)]
+        players: Vec<serde_json::Value>,
+        owner: Option<Owner>,
+    }
+    let page: Page<Raw> = serde_json::from_str(body).map_err(|e| bad("private servers", e))?;
+    Ok(page
+        .data
+        .into_iter()
+        .filter_map(|s| {
+            let access_code = s.access_code.filter(|c| valid_access_code(c))?;
+            Some(PrivateServer {
+                name: s.name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Private server".into()),
+                owner: s.owner.and_then(|o| o.display_name.or(o.name)),
+                playing: s.playing.unwrap_or(s.players.len() as u32),
+                max_players: s.max_players.unwrap_or(0),
+                access_code,
+            })
+        })
+        .collect())
+}
+
 /// One row of the charts page, for example "Top Trending".
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -414,6 +498,32 @@ mod tests {
     fn finds_the_continue_row() {
         assert_eq!(continue_universe_ids(OMNI).unwrap(), vec![6035872082, 994732206]);
         assert!(continue_universe_ids(r#"{"sorts":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn public_servers_are_sorted_emptiest_first_and_skip_full_or_odd_ones() {
+        // Field names captured live on 2026-11-12.
+        let body = r#"{"previousPageCursor":null,"nextPageCursor":"x","data":[
+            {"id":"aaaa-1","maxPlayers":40,"playing":12,"playerTokens":[],"players":[],"fps":59.9,"ping":80},
+            {"id":"bbbb-2","maxPlayers":40,"playing":1,"playerTokens":[],"players":[],"fps":60.0,"ping":120},
+            {"id":"cccc-3","maxPlayers":40,"playing":40,"fps":60.0,"ping":50},
+            {"id":"bad id&x=1","maxPlayers":40,"playing":0}]}"#;
+        let servers = public_servers(body).unwrap();
+        assert_eq!(servers.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["bbbb-2", "aaaa-1"]);
+        assert_eq!((servers[0].playing, servers[0].max_players, servers[0].ping), (1, 40, Some(120)));
+        assert!(public_servers(r#"{"data":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn private_servers_need_a_usable_access_code() {
+        let body = r#"{"gameJoinRestricted":false,"data":[
+            {"name":"Farm","accessCode":"3f2a-9c1e_7b","maxPlayers":20,"players":[{},{}],"owner":{"displayName":"Ari","name":"ari"}},
+            {"name":"No code","maxPlayers":20},
+            {"name":"Bad","accessCode":"x&placeId=1","maxPlayers":20}]}"#;
+        let servers = private_servers(body).unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!((servers[0].name.as_str(), servers[0].owner.as_deref(), servers[0].playing), ("Farm", Some("Ari"), 2));
+        assert!(private_servers(r#"{"gameJoinRestricted":false,"data":[]}"#).unwrap().is_empty());
     }
 
     #[test]

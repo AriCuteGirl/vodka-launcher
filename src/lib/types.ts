@@ -13,6 +13,36 @@ export interface Game {
   iconUrl: string | null;
 }
 
+export interface Server {
+  id: string;
+  playing: number;
+  maxPlayers: number;
+  ping: number | null;
+}
+
+export interface PrivateServer {
+  name: string;
+  owner: string | null;
+  playing: number;
+  maxPlayers: number;
+  accessCode: string;
+}
+
+export interface ServerLists {
+  public: Server[];
+  private: PrivateServer[];
+  privateError: string | null;
+}
+
+/** Which server to start in. Leave it out to let Roblox choose. */
+export type Target = { kind: "server"; placeId: number; gameId: string } | { kind: "private"; accessCode: string };
+
+export interface FriendLocation {
+  game: Game;
+  placeId: number;
+  gameId: string;
+}
+
 export interface Chart {
   name: string;
   games: Game[];

@@ -208,9 +208,22 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return null;
     case "launch_game": {
       if (!mocktail().installed) throw { kind: "mocktail_missing", message: "Mocktail is not installed." };
-      const a = active();
+      const a = args.accountId == null ? active() : accounts.find((x) => x.id === args.accountId);
       if (!a) throw { kind: "not_signed_in", message: "You're not signed in to Roblox." };
       return launch(args.game as Game, a);
+    }
+    case "list_servers":
+      await wait(400);
+      if (s in ERRORS) throw ERRORS[s];
+      return {
+        public: s === "empty" ? [] : [1, 3, 7, 12, 19, 26, 31, 38].map((playing, i) => ({ id: `0f0e-${i}`, playing, maxPlayers: 40, ping: 60 + i * 17 })),
+        private: s === "empty" ? [] : [{ name: "Farm room", owner: "Frostbyte", playing: 2, maxPlayers: 20, accessCode: "3f2a-9c" }],
+        privateError: null,
+      };
+    case "friend_location": {
+      const friend = demoFriends.find((f) => f.id === args.userId);
+      if (!friend?.presence.gameId) throw { kind: "other", message: "That friend's game can't be joined: their privacy settings hide the server." };
+      return { game: DEMO_GAMES[0], placeId: 17625359962, gameId: friend.presence.gameId };
     }
     case "list_friends":
       await wait(300);

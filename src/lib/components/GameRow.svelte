@@ -1,6 +1,6 @@
 <script lang="ts">
   import { matches } from "$lib/format";
-  import { app, loadHome, phaseOf, play, signIn } from "$lib/state.svelte";
+  import { app, loadHome, openLaunchDialog, phaseOf, play, signIn } from "$lib/state.svelte";
   import type { Game, Loadable } from "$lib/types";
   import Button from "./Button.svelte";
   import GameTile from "./GameTile.svelte";
@@ -85,7 +85,7 @@
   {:else}
     <div class="grid" class:wrap bind:this={scroller}>
       {#each visible as game (game.universeId)}
-        <GameTile {game} onplay={play} disabled={!canPlay} phase={phaseOf(game)} />
+        <GameTile {game} onplay={play} onservers={app.account ? openLaunchDialog : undefined} disabled={!canPlay} phase={phaseOf(game)} />
       {/each}
     </div>
   {/if}

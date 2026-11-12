@@ -6,14 +6,21 @@
   let {
     game,
     onplay,
+    onservers,
     disabled = false,
     phase = "idle",
-  }: { game: Game; onplay: (game: Game) => void; disabled?: boolean; phase?: "idle" | "starting" | "playing" } = $props();
+  }: { game: Game; onplay: (game: Game) => void; onservers?: (game: Game) => void; disabled?: boolean; phase?: "idle" | "starting" | "playing" } = $props();
   const busy = $derived(phase !== "idle");
   let failed = $state(false);
 </script>
 
-<button class="tile" class:busy {disabled} onclick={() => onplay(game)} aria-label="Play {game.name}" title={game.name}>
+<div class="tile" class:busy class:off={disabled}>
+  {#if onservers && !disabled}
+    <button class="servers" onclick={() => onservers(game)} aria-label="Choose a server or accounts for {game.name}" title="Servers and accounts">
+      <Icon name="settings" size={15} />
+    </button>
+  {/if}
+  <button class="main" {disabled} onclick={() => onplay(game)} aria-label="Play {game.name}" title={game.name}>
   <span class="art">
     {#if game.iconUrl && !failed}
       <img src={game.iconUrl} alt="" loading="lazy" onerror={() => (failed = true)} />
@@ -28,10 +35,15 @@
   <span class="meta">
     {#if game.playing != null}<i></i>{compact(game.playing)} playing{:else}&nbsp;{/if}
   </span>
-</button>
+  </button>
+</div>
 
 <style>
   .tile {
+    position: relative;
+    animation: rise var(--slow) var(--ease) backwards;
+  }
+  .main {
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -42,10 +54,36 @@
     border-radius: var(--r-lg);
     text-align: left;
     cursor: pointer;
-    animation: rise var(--slow) var(--ease) backwards;
   }
-  .tile:disabled {
+  .main:disabled {
     cursor: not-allowed;
+  }
+  .servers {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    border: 1px solid var(--line-strong);
+    background: rgba(8, 12, 17, 0.82);
+    color: var(--text-0);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity var(--fast) var(--ease),
+      background var(--fast) var(--ease);
+  }
+  .tile:hover .servers,
+  .servers:focus-visible {
+    opacity: 1;
+  }
+  .servers:hover {
+    background: var(--frost);
+    color: var(--frost-ink);
   }
   .art {
     position: relative;
@@ -97,24 +135,24 @@
       opacity var(--fast) var(--ease),
       transform var(--slow) var(--ease);
   }
-  .tile:hover:not(:disabled) .art,
-  .tile:focus-visible .art,
+  .tile:not(.off):hover .art,
+  .main:focus-visible .art,
   .tile.busy .art {
     transform: translateY(-4px);
     border-color: rgba(164, 222, 255, 0.45);
     box-shadow: var(--glow), var(--shadow-2);
   }
-  .tile:hover:not(:disabled) img,
-  .tile:focus-visible img {
+  .tile:not(.off):hover img,
+  .main:focus-visible img {
     filter: brightness(0.8);
   }
-  .tile:hover:not(:disabled) .play,
-  .tile:focus-visible .play,
+  .tile:not(.off):hover .play,
+  .main:focus-visible .play,
   .tile.busy .play {
     opacity: 1;
     transform: translate(-50%, 0);
   }
-  .tile:disabled .art {
+  .tile.off .art {
     filter: grayscale(0.7) brightness(0.7);
   }
   .name {

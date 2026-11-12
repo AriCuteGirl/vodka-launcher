@@ -191,8 +191,34 @@ async fn game_charts(state: State<'_, AppState>) -> Result<Vec<Chart>> {
     state.api.charts().await
 }
 
-/// Checks Mocktail is there and works out who is playing with which options.
-async fn prepare_launch(app: &AppHandle) -> Result<(SavedAccount, Vec<(&'static str, String)>)> {
+/// Which server of a game to start in. Absent means "let Roblox choose".
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum Target {
+    /// One public server, by its id.
+    #[serde(rename_all = "camelCase")]
+    Server { place_id: u64, game_id: String },
+    /// A private server, by its access code.
+    #[serde(rename_all = "camelCase")]
+    Private { access_code: String },
+}
+
+/// The launch link for a game and an optional server choice. Rejects ids that could alter the link.
+fn link_for(game: &Game, target: Option<&Target>) -> Result<String> {
+    match target {
+        None => Ok(mocktail::launch::launch_uri(game.place_id)),
+        Some(Target::Server { place_id, game_id }) if roblox_api::parse::valid_game_id(game_id) => {
+            Ok(mocktail::launch::join_uri(*place_id, game_id))
+        }
+        Some(Target::Private { access_code }) if roblox_api::parse::valid_access_code(access_code) => {
+            Ok(mocktail::launch::private_uri(game.place_id, access_code))
+        }
+        Some(_) => Err(AppError::Launch("that server id doesn't look right.".into())),
+    }
+}
+
+/// Checks Mocktail is there and works out who is playing (the active account unless one is named) with which options.
+async fn prepare_launch(app: &AppHandle, account_id: Option<u64>) -> Result<(SavedAccount, Vec<(&'static str, String)>)> {
     let status = blocking(|| Ok(mocktail::detect::detect())).await?;
     if !status.flatpak_available {
         return Err(AppError::FlatpakMissing);
@@ -201,18 +227,87 @@ async fn prepare_launch(app: &AppHandle) -> Result<(SavedAccount, Vec<(&'static 
         return Err(AppError::MocktailMissing);
     }
     let saved = settings::load(&config_dir(app)?);
-    let account = saved.active().cloned().ok_or(AppError::NotSignedIn)?;
+    let account = match account_id {
+        Some(id) => saved.accounts.iter().find(|a| a.id == id).cloned(),
+        None => saved.active().cloned(),
+    }
+    .ok_or(AppError::NotSignedIn)?;
     let options = tweaks::modernize(tweaks::effective(&saved.defaults, saved.account_options.get(&account.id)));
     // Saved options were validated when they were saved; check again in case the file was edited by hand.
     let options = tweaks::validate(&options).map_err(AppError::Launch)?;
     Ok((account, tweaks::to_env(&options)))
 }
 
+/// Starts a game as the active account, or as `account_id`, optionally in a chosen server.
 #[tauri::command]
-async fn launch_game(app: AppHandle, state: State<'_, AppState>, game: Game) -> Result<u32> {
-    let (account, env) = prepare_launch(&app).await?;
-    let uri = mocktail::launch::launch_uri(game.place_id);
+async fn launch_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game: Game,
+    account_id: Option<u64>,
+    target: Option<Target>,
+) -> Result<u32> {
+    let uri = link_for(&game, target.as_ref())?;
+    let (account, env) = prepare_launch(&app, account_id).await?;
     instances::launch(app, state.instances.clone(), account, game, uri, env).await
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerLists {
+    public: Vec<roblox_api::Server>,
+    private: Vec<roblox_api::PrivateServer>,
+    /// Why the private list is empty when that is due to an error rather than there being none.
+    private_error: Option<String>,
+}
+
+/// Servers of a game: public ones with room (emptiest first) and private ones the active account can join.
+#[tauri::command]
+async fn list_servers(app: AppHandle, state: State<'_, AppState>, place_id: u64) -> Result<ServerLists> {
+    let public = state.api.public_servers(place_id).await?;
+    let (private, private_error) = match active_cookie(&app).await {
+        Ok((_, cookie)) => match state.api.private_servers(&cookie, place_id).await {
+            Ok(list) => (list, None),
+            Err(e) => (vec![], Some(e.to_string())),
+        },
+        Err(e) => (vec![], Some(e.to_string())),
+    };
+    Ok(ServerLists { public, private, private_error })
+}
+
+/// Where a friend is right now, as something several accounts can then be sent to.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FriendLocation {
+    game: Game,
+    place_id: u64,
+    game_id: String,
+}
+
+async fn locate_friend(app: &AppHandle, api: &roblox_api::Client, user_id: u64) -> Result<FriendLocation> {
+    let (_, cookie) = active_cookie(app).await?;
+    let presence = api.presences(&cookie, &[user_id]).await?.remove(&user_id);
+    let mut presence = presence.ok_or_else(|| AppError::Other("Roblox didn't say where that friend is.".into()))?;
+    if presence.join_target().is_none() {
+        if let Some(own) = own_presence(app, api, user_id).await {
+            presence = own;
+        }
+    }
+    let Some((place_id, game_id)) = presence.join_target() else {
+        return Err(AppError::Other(match presence.kind {
+            "in_game" => "That friend's game can't be joined: their privacy settings hide the server.".into(),
+            _ => "That friend isn't in a game any more.".into(),
+        }));
+    };
+    let name = presence.location.clone().unwrap_or_else(|| "a friend's game".into());
+    let game = api.game_for(presence.universe_id.unwrap_or(0), presence.root_place_id.unwrap_or(place_id), &name).await;
+    Ok(FriendLocation { game, place_id, game_id: game_id.to_owned() })
+}
+
+/// Looks up a friend's server so the UI can send one or several accounts there with `launch_game`.
+#[tauri::command]
+async fn friend_location(app: AppHandle, state: State<'_, AppState>, user_id: u64) -> Result<FriendLocation> {
+    locate_friend(&app, &state.api, user_id).await
 }
 
 /// Where one of Vodka's own accounts is, asked with that account's own session.
@@ -250,34 +345,14 @@ async fn answer_friend_request(app: AppHandle, state: State<'_, AppState>, user_
     state.api.answer_friend_request(&active_cookie(&app).await?.1, user_id, accept).await
 }
 
-/// Joins the server a friend is on, if Roblox lets us see it. Their presence is read fresh,
+/// Joins the server a friend is on as the active account. Their presence is read fresh,
 /// so a friend who just left is reported instead of joined.
 #[tauri::command]
 async fn join_friend(app: AppHandle, state: State<'_, AppState>, user_id: u64) -> Result<u32> {
-    let (account, env) = prepare_launch(&app).await?;
-    let cookie = blocking({
-        let id = account.id;
-        move || accounts::load_session(id)
-    })
-    .await?
-    .ok_or(AppError::NotSignedIn)?;
-    let presence = state.api.presences(&cookie, &[user_id]).await?.remove(&user_id);
-    let mut presence = presence.ok_or_else(|| AppError::Other("Roblox didn't say where that friend is.".into()))?;
-    if presence.join_target().is_none() {
-        if let Some(own) = own_presence(&app, &state.api, user_id).await {
-            presence = own;
-        }
-    }
-    let Some((place_id, game_id)) = presence.join_target() else {
-        return Err(AppError::Other(match presence.kind {
-            "in_game" => "That friend's game can't be joined: their privacy settings hide the server.".into(),
-            _ => "That friend isn't in a game any more.".into(),
-        }));
-    };
-    let uri = mocktail::launch::join_uri(place_id, game_id);
-    let name = presence.location.clone().unwrap_or_else(|| "a friend's game".into());
-    let game = state.api.game_for(presence.universe_id.unwrap_or(0), presence.root_place_id.unwrap_or(place_id), &name).await;
-    instances::launch(app, state.instances.clone(), account, game, uri, env).await
+    let (account, env) = prepare_launch(&app, None).await?;
+    let at = locate_friend(&app, &state.api, user_id).await?;
+    let uri = mocktail::launch::join_uri(at.place_id, &at.game_id);
+    instances::launch(app, state.instances.clone(), account, at.game, uri, env).await
 }
 
 #[tauri::command]
@@ -380,6 +455,8 @@ pub fn run() {
             list_friend_requests,
             answer_friend_request,
             join_friend,
+            friend_location,
+            list_servers,
             list_instances,
             stop_instance,
             get_settings,
@@ -390,4 +467,38 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Vodka Launcher");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn game() -> Game {
+        Game { universe_id: 1, place_id: 10, name: "G".into(), playing: None, icon_url: None }
+    }
+
+    #[test]
+    fn links_follow_the_chosen_server() {
+        assert_eq!(link_for(&game(), None).unwrap(), "roblox://experiences/start?placeId=10");
+        let server = Target::Server { place_id: 11, game_id: "0f0e-11".into() };
+        assert_eq!(link_for(&game(), Some(&server)).unwrap(), "roblox://experiences/start?placeId=11&gameInstanceId=0f0e-11");
+        let private = Target::Private { access_code: "3f2a_9c".into() };
+        assert_eq!(link_for(&game(), Some(&private)).unwrap(), "roblox://experiences/start?placeId=10&accessCode=3f2a_9c");
+    }
+
+    #[test]
+    fn ids_that_could_change_the_link_are_refused() {
+        let server = Target::Server { place_id: 11, game_id: "x&placeId=666".into() };
+        assert!(link_for(&game(), Some(&server)).is_err());
+        let private = Target::Private { access_code: "a b".into() };
+        assert!(link_for(&game(), Some(&private)).is_err());
+    }
+
+    #[test]
+    fn targets_arrive_from_the_ui_in_camel_case() {
+        let t: Target = serde_json::from_str(r#"{"kind":"server","placeId":5,"gameId":"ab-1"}"#).unwrap();
+        assert!(matches!(t, Target::Server { place_id: 5, .. }));
+        let t: Target = serde_json::from_str(r#"{"kind":"private","accessCode":"zz"}"#).unwrap();
+        assert!(matches!(t, Target::Private { .. }));
+    }
 }

@@ -5,7 +5,7 @@
   import Modal from "$lib/components/Modal.svelte";
   import StateCard from "$lib/components/StateCard.svelte";
   import { elapsed, memory } from "$lib/format";
-  import { app, MAX_INSTANCES, refreshAccounts, removeAccount, signIn, stopInstance, switchAccount } from "$lib/state.svelte";
+  import { app, MAX_INSTANCES, refreshAccounts, removeAccount, signIn, stopInstance, switchAccount, toggleBatch } from "$lib/state.svelte";
   import type { Account } from "$lib/types";
   import { onMount } from "svelte";
 
@@ -50,12 +50,28 @@
     <Button variant="primary" icon="plus" busy={app.signingIn} onclick={signIn}>Add account</Button>
   </header>
 
+  {#if app.batch.length}
+    <div class="selection glass">
+      <span><b>{app.batch.length} selected.</b> Pick a game or a friend and they all start together, in the same server if you choose one.</span>
+      <a href="/">Home</a>
+      <a href="/games">Games</a>
+      <a href="/friends">Friends</a>
+      <Button size="sm" variant="ghost" onclick={() => (app.batch = [])}>Clear</Button>
+    </div>
+  {:else if app.accounts.length > 1}
+    <p class="faint hint">Tick several accounts to start a game, or join a friend, with all of them at once.</p>
+  {/if}
+
   {#if app.accounts.length === 0}
     <StateCard icon="players" title="No accounts yet">Add a Roblox account to see your games and start playing.</StateCard>
   {:else}
     <ul class="cards">
       {#each app.accounts as a (a.id)}
-        <li class="card glass" class:active={a.active}>
+        <li class="card glass" class:active={a.active} class:ticked={app.batch.includes(a.id)}>
+          <label class="tick" title="Include {a.displayName} in the next launch">
+            <input type="checkbox" checked={app.batch.includes(a.id)} onchange={() => toggleBatch(a.id)} />
+            <span class="sr-only">Include {a.displayName} in the next launch</span>
+          </label>
           <Avatar name={a.displayName} src={a.avatarUrl} size={52} status={dot(a)} />
           <div class="who">
             <b>{a.displayName}</b>
@@ -149,13 +165,59 @@
   .card {
     position: relative;
     display: grid;
-    grid-template-columns: auto 1fr;
-    gap: var(--s-3) var(--s-4);
+    grid-template-columns: auto auto 1fr;
+    gap: var(--s-3) var(--s-3);
     align-items: center;
     padding: var(--s-4);
     transition:
       border-color var(--fast) var(--ease),
       box-shadow var(--slow) var(--ease);
+  }
+  .card.ticked {
+    background: var(--glass-hover);
+    border-color: rgba(164, 222, 255, 0.5);
+  }
+  .tick {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+  }
+  .tick input {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    border-radius: 50%;
+    border: 2px solid var(--line-strong);
+    background: transparent;
+    cursor: pointer;
+    transition:
+      background var(--fast) var(--ease),
+      border-color var(--fast) var(--ease);
+  }
+  .tick input:checked {
+    border-color: var(--frost);
+    background: var(--frost) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2303202f' stroke-width='3.500' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.500l4.500 4.500L19 7.500'/%3E%3C/svg%3E") center / 14px no-repeat;
+  }
+  .selection {
+    display: flex;
+    align-items: center;
+    gap: var(--s-4);
+    padding: var(--s-3) var(--s-4);
+    border-color: rgba(164, 222, 255, 0.4);
+    font-size: var(--fs-sm);
+  }
+  .selection span {
+    flex: 1;
+    color: var(--text-1);
+  }
+  .selection b {
+    color: var(--text-0);
+  }
+  .hint {
+    font-size: var(--fs-sm);
   }
   .card.active {
     border-color: rgba(164, 222, 255, 0.4);

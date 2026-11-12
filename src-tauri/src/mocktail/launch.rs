@@ -36,6 +36,11 @@ pub fn launch_uri(place_id: u64) -> String {
     format!("roblox://experiences/start?placeId={place_id}")
 }
 
+/// A link into a private server. `access_code` must already be validated.
+pub fn private_uri(place_id: u64, access_code: &str) -> String {
+    format!("roblox://experiences/start?placeId={place_id}&accessCode={access_code}")
+}
+
 /// A link into one specific server, for joining a friend. `game_id` must already be validated.
 pub fn join_uri(place_id: u64, game_id: &str) -> String {
     format!("roblox://experiences/start?placeId={place_id}&gameInstanceId={game_id}")
@@ -93,6 +98,11 @@ mod tests {
     #[test]
     fn builds_a_server_link_for_joining_a_friend() {
         assert_eq!(join_uri(5, "0f0e-11"), "roblox://experiences/start?placeId=5&gameInstanceId=0f0e-11");
+    }
+
+    #[test]
+    fn builds_a_private_server_link() {
+        assert_eq!(private_uri(5, "3f2a-9c"), "roblox://experiences/start?placeId=5&accessCode=3f2a-9c");
     }
 
     #[test]

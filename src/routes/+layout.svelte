@@ -2,6 +2,7 @@
   import "$lib/styles/app.css";
   import Button from "$lib/components/Button.svelte";
   import Icon from "$lib/components/Icon.svelte";
+  import LaunchDialog from "$lib/components/LaunchDialog.svelte";
   import Logo from "$lib/components/Logo.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Onboarding from "$lib/components/Onboarding.svelte";
@@ -33,6 +34,16 @@
       <div class="panel">
         {#if !app.online}
           <div class="offline" role="status"><Icon name="wifiOff" size={16} />You're offline. Games and thumbnails will load again when the connection is back.</div>
+        {/if}
+        {#if app.batch.length}
+          <div class="batch" role="status">
+            <Icon name="players" size={16} />
+            <span>
+              Launching as <b>{app.batch.length} account{app.batch.length === 1 ? "" : "s"}</b>:
+              {app.accounts.filter((a) => app.batch.includes(a.id)).map((a) => a.displayName).join(", ")}. Press Play on a game or Join on a friend.
+            </span>
+            <button onclick={() => (app.batch = [])}>Clear</button>
+          </div>
         {/if}
         <div class="body">
           <main>{@render children()}</main>
@@ -85,6 +96,8 @@
     {/snippet}
   </Modal>
 {/if}
+
+{#if app.launchDialog}<LaunchDialog />{/if}
 
 <Toasts />
 
@@ -144,6 +157,39 @@
     border-bottom: 1px solid rgba(255, 213, 133, 0.25);
     color: var(--warn);
     font-size: var(--fs-sm);
+  }
+  .batch {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    padding: 8px var(--s-4);
+    background: rgba(98, 198, 255, 0.1);
+    border-bottom: 1px solid rgba(164, 222, 255, 0.3);
+    color: var(--frost);
+    font-size: var(--fs-sm);
+  }
+  .batch span {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .batch b {
+    color: var(--text-0);
+  }
+  .batch button {
+    padding: 3px 12px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--line-strong);
+    background: var(--glass);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .batch button:hover {
+    background: var(--glass-hover);
   }
   .body {
     flex: 1;
