@@ -13,6 +13,11 @@ export interface Game {
   iconUrl: string | null;
 }
 
+export interface Chart {
+  name: string;
+  games: Game[];
+}
+
 export interface InstallStep {
   label: string;
   command: string;

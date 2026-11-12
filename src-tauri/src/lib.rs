@@ -9,7 +9,7 @@ mod tweaks;
 use error::{AppError, Result};
 use instances::{InstanceView, SharedManager};
 use mocktail::detect::MocktailStatus;
-use roblox_api::{Game, Presence, User};
+use roblox_api::{Chart, Game, Presence, User};
 use serde::{Deserialize, Serialize};
 use settings::{SavedAccount, Settings};
 use std::path::PathBuf;
@@ -179,6 +179,19 @@ async fn favorites(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Gam
 }
 
 #[tauri::command]
+async fn search_games(state: State<'_, AppState>, query: String) -> Result<Vec<Game>> {
+    if query.chars().count() > 100 {
+        return Err(AppError::Other("That search is too long.".into()));
+    }
+    state.api.search(&query).await
+}
+
+#[tauri::command]
+async fn game_charts(state: State<'_, AppState>) -> Result<Vec<Chart>> {
+    state.api.charts().await
+}
+
+#[tauri::command]
 async fn launch_game(app: AppHandle, state: State<'_, AppState>, game: Game) -> Result<u32> {
     let status = blocking(|| Ok(mocktail::detect::detect())).await?;
     if !status.flatpak_available {
@@ -288,6 +301,8 @@ pub fn run() {
             remove_account,
             continue_playing,
             favorites,
+            search_games,
+            game_charts,
             launch_game,
             list_instances,
             stop_instance,

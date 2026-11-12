@@ -113,6 +113,92 @@ pub fn thumbnails(body: &str) -> Result<HashMap<u64, String>> {
         .collect())
 }
 
+/// One row of the charts page, for example "Top Trending".
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Chart {
+    pub name: String,
+    pub games: Vec<Game>,
+}
+
+/// A game as the search and charts endpoints describe it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Listed {
+    universe_id: Option<u64>,
+    root_place_id: Option<u64>,
+    name: Option<String>,
+    player_count: Option<u64>,
+    #[serde(default)]
+    is_sponsored: Option<bool>,
+}
+
+impl Listed {
+    /// Ads and entries without a place to join are dropped.
+    fn into_game(self) -> Option<Game> {
+        if self.is_sponsored == Some(true) {
+            return None;
+        }
+        Some(Game {
+            universe_id: self.universe_id?,
+            place_id: self.root_place_id.filter(|id| *id > 0)?,
+            name: self.name.filter(|n| !n.trim().is_empty())?,
+            playing: self.player_count,
+            icon_url: None,
+        })
+    }
+}
+
+pub fn search_results(body: &str) -> Result<Vec<Game>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Group {
+        content_group_type: Option<String>,
+        #[serde(default)]
+        contents: Vec<Listed>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Body {
+        search_results: Vec<Group>,
+    }
+    let body: Body = serde_json::from_str(body).map_err(|e| bad("search", e))?;
+    let mut seen = std::collections::HashSet::new();
+    Ok(body
+        .search_results
+        .into_iter()
+        .filter(|g| g.content_group_type.as_deref() == Some("Game"))
+        .flat_map(|g| g.contents)
+        .filter_map(Listed::into_game)
+        .filter(|g| seen.insert(g.universe_id))
+        .collect())
+}
+
+pub fn charts(body: &str, per_chart: usize) -> Result<Vec<Chart>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Sort {
+        sort_display_name: Option<String>,
+        content_type: Option<String>,
+        #[serde(default)]
+        games: Vec<Listed>,
+    }
+    #[derive(Deserialize)]
+    struct Body {
+        sorts: Vec<Sort>,
+    }
+    let body: Body = serde_json::from_str(body).map_err(|e| bad("charts", e))?;
+    Ok(body
+        .sorts
+        .into_iter()
+        .filter(|s| s.content_type.as_deref() == Some("Games"))
+        .filter_map(|s| {
+            let games: Vec<Game> = s.games.into_iter().filter_map(Listed::into_game).take(per_chart).collect();
+            (!games.is_empty()).then(|| Chart { name: s.sort_display_name.unwrap_or_else(|| "Games".into()), games })
+        })
+        .collect())
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Presence {
@@ -245,6 +331,33 @@ mod tests {
     fn finds_the_continue_row() {
         assert_eq!(continue_universe_ids(OMNI).unwrap(), vec![6035872082, 994732206]);
         assert!(continue_universe_ids(r#"{"sorts":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parses_live_search_results() {
+        let games = search_results(include_str!("../../tests/fixtures/search.json")).unwrap();
+        assert_eq!(games.len(), 4);
+        assert!(games.iter().all(|g| g.place_id > 0 && !g.name.is_empty() && g.playing.is_some()));
+    }
+
+    #[test]
+    fn search_drops_ads_duplicates_and_non_games() {
+        let body = r#"{"searchResults":[
+            {"contentGroupType":"Game","contents":[{"universeId":1,"rootPlaceId":10,"name":"A","playerCount":5}]},
+            {"contentGroupType":"Game","contents":[{"universeId":1,"rootPlaceId":10,"name":"A","playerCount":5}]},
+            {"contentGroupType":"Game","contents":[{"universeId":2,"rootPlaceId":20,"name":"Ad","isSponsored":true}]},
+            {"contentGroupType":"Game","contents":[{"universeId":3,"rootPlaceId":0,"name":"No place"}]},
+            {"contentGroupType":"User","contents":[{"universeId":4,"rootPlaceId":40,"name":"Not a game"}]}]}"#;
+        let games = search_results(body).unwrap();
+        assert_eq!(games.iter().map(|g| g.universe_id).collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn parses_live_charts_and_skips_the_filter_row() {
+        let rows = charts(include_str!("../../tests/fixtures/charts.json"), 2).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "Top Trending");
+        assert!(rows.iter().all(|r| r.games.len() == 2));
     }
 
     #[test]

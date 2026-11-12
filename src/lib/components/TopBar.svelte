@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { app, removeAccount, signIn, switchAccount } from "$lib/state.svelte";
   import Avatar from "./Avatar.svelte";
@@ -42,8 +43,16 @@
   <div class="right">
     <label class="search">
       <Icon name="search" size={15} />
-      <span class="sr-only">Search your games</span>
-      <input bind:this={searchInput} bind:value={app.search} type="search" placeholder="Search your games" spellcheck="false" autocomplete="off" />
+      <span class="sr-only">Filter your games, or press Enter to search all of Roblox</span>
+      <input
+        bind:this={searchInput}
+        bind:value={app.search}
+        onkeydown={(e) => {
+          // Enter searches all of Roblox; typing alone filters what is on screen.
+          if (e.key === "Enter" && app.search.trim()) void goto(`/games?q=${encodeURIComponent(app.search.trim())}`);
+        }}
+        type="search"
+        placeholder="Filter, or Enter to search Roblox" spellcheck="false" autocomplete="off" />
       <kbd>Ctrl K</kbd>
     </label>
 

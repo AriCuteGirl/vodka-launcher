@@ -159,6 +159,21 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return games(DEMO_GAMES.slice(0, 6));
     case "favorites":
       return games(DEMO_GAMES.slice(3));
+    case "search_games": {
+      const q = String(args.query).toLowerCase();
+      const found = await games(DEMO_GAMES);
+      return s === "empty" ? [] : found.filter((g) => g.name.toLowerCase().includes(q));
+    }
+    case "game_charts": {
+      const all = await games(DEMO_GAMES);
+      return all.length
+        ? [
+            { name: "Top Trending", games: all },
+            { name: "Top Playing Now", games: [...all].sort((a, b) => (b.playing ?? 0) - (a.playing ?? 0)) },
+            { name: "Up-and-Coming", games: [...all].reverse() },
+          ]
+        : [];
+    }
     case "get_settings":
       return { ...settings, onboarded: s === "onboarding" ? false : settings.onboarded };
     case "set_flags":
