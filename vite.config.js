@@ -17,6 +17,9 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: "127.0.0.1",
+    // The app's webview must not reuse scripts from an earlier dev session: a restarted
+    // dev server can't serve a component's styles until it has compiled that component again.
+    headers: { "Cache-Control": "no-store" },
     watch: { ignored: ["**/src-tauri/**"] },
   },
 });
