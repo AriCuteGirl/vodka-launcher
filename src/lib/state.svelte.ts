@@ -8,8 +8,10 @@ export interface Toast {
   text: string;
 }
 
-/** Vodka runs at most this many games at once: one per path Mocktail can be started from. */
-export const MAX_INSTANCES = 2;
+/** Vodka runs at most this many games at once (one per account). */
+export const MAX_INSTANCES = 10;
+/** Roughly what one running game needs. */
+const GAME_MEMORY_GB = 1.5;
 
 export const app = $state({
   booted: false,
@@ -35,10 +37,10 @@ export const app = $state({
 
 let nextToast = 1;
 
-export function toast(text: string, tone: Toast["tone"] = "info") {
+export function toast(text: string, tone: Toast["tone"] = "info", ms = tone === "danger" ? 8000 : 4500) {
   const id = nextToast++;
   app.toasts.push({ id, tone, text });
-  setTimeout(() => dismissToast(id), tone === "danger" ? 8000 : 4500);
+  setTimeout(() => dismissToast(id), ms);
 }
 
 export function dismissToast(id: number) {
@@ -217,21 +219,32 @@ async function start(name: string, run: () => Promise<unknown>) {
     return;
   }
   if (app.instances.length >= MAX_INSTANCES) {
-    toast(`Vodka can run ${MAX_INSTANCES} games at once. Close one first.`);
+    toast(`Vodka runs at most ${MAX_INSTANCES} games at once. Close one first.`);
     return;
   }
   if (app.instances.length > 0 && !app.settings.multiInstanceAccepted) {
     app.pendingLaunch = { name, run };
     return;
   }
+  warnAboutLoad();
   await launch(run);
+}
+
+/** A five-second heads-up each time another game is added on top of running ones. */
+function warnAboutLoad() {
+  const count = app.instances.length + 1;
+  if (count < 2) return;
+  toast(`Starting game ${count}. Together they need about ${(count * GAME_MEMORY_GB).toFixed(1)} GB of memory, and each one adds account risk.`, "danger", 5000);
 }
 
 export async function acceptMultiInstance() {
   const pending = app.pendingLaunch;
   app.pendingLaunch = null;
   await setFlags({ multiInstanceAccepted: true });
-  if (pending && app.settings.multiInstanceAccepted) await launch(pending.run);
+  if (pending && app.settings.multiInstanceAccepted) {
+    warnAboutLoad();
+    await launch(pending.run);
+  }
 }
 
 /** Saves launch options for all accounts (`accountId` null) or one. Returns the error text if they were rejected. */

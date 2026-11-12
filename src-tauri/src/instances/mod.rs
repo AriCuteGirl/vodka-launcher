@@ -1,11 +1,12 @@
 //! Running games. Each one is a Mocktail process with its own account and profile.
 //!
-//! Mocktail allows one process per executable path, and its Flatpak ships the
-//! same binary at two paths. Vodka uses one path per slot, so two games can run
-//! at once. Mocktail's authors do not support this; see the warning in the UI.
+//! Mocktail allows one process per executable path. Vodka gives every running game
+//! its own path (see `slots`), so several can run at once. Mocktail's authors do not
+//! support this; see the warning in the UI.
 
 pub mod proc;
 pub mod profiles;
+pub mod slots;
 
 use crate::accounts;
 use crate::error::{AppError, Result};
@@ -24,8 +25,6 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command;
 
-/// The path Mocktail is started from, per slot. `None` is the Flatpak's default command.
-pub const SLOT_COMMANDS: [Option<&str>; 2] = [None, Some("/app/lib/mocktail/mocktail")];
 const LOG_LINES: usize = 400;
 
 struct Instance {
@@ -91,9 +90,9 @@ pub fn pick_slot(used: &[(usize, u64)], account_id: u64, account_name: &str) -> 
             "{account_name} is already in a game. Close it, or switch to another account."
         )));
     }
-    (0..SLOT_COMMANDS.len())
+    (0..slots::MAX_INSTANCES)
         .find(|slot| !used.iter().any(|(s, _)| s == slot))
-        .ok_or_else(|| AppError::Launch(format!("Vodka can run {} games at once, and all are in use.", SLOT_COMMANDS.len())))
+        .ok_or_else(|| AppError::Launch(format!("Vodka runs at most {} games at once. Close one first.", slots::MAX_INSTANCES)))
 }
 
 fn now_ms() -> u64 {
@@ -103,6 +102,20 @@ fn now_ms() -> u64 {
 fn flatpak_data() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").ok_or_else(|| AppError::Other("HOME is not set.".into()))?;
     Ok(profiles::flatpak_data(&PathBuf::from(home)))
+}
+
+/// The Mocktail binary inside the Flatpak's install folder, as seen from outside the sandbox.
+fn installed_binary() -> Result<PathBuf> {
+    let out = std::process::Command::new("flatpak")
+        .args(["info", "--show-location", APP_ID])
+        .env("LC_ALL", "C")
+        .output()
+        .map_err(|_| AppError::FlatpakMissing)?;
+    let location = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if !out.status.success() || location.is_empty() {
+        return Err(AppError::MocktailMissing);
+    }
+    Ok(PathBuf::from(location).join("files/bin/mocktail"))
 }
 
 fn pump<R: AsyncRead + Unpin + Send + 'static>(reader: R, app: AppHandle, manager: SharedManager, id: u32) {
@@ -147,7 +160,7 @@ pub async fn launch(
     env: Vec<(&'static str, String)>,
 ) -> Result<u32> {
     let used: Vec<(usize, u64)> = manager.lock().unwrap().instances.iter().map(|i| (i.slot, i.account.id)).collect();
-    pick_slot(&used, account.id, &account.display_name)?;
+    let likely_slot = pick_slot(&used, account.id, &account.display_name)?;
 
     let account_id = account.id;
     let (cookie, profile) = tauri::async_runtime::spawn_blocking(move || -> Result<(String, ProfilePaths)> {
@@ -156,6 +169,15 @@ pub async fn launch(
         let profile = profiles::profile_paths(&data, account_id);
         profiles::prepare(&data.join("mocktail"), &profile)
             .map_err(|e| AppError::Launch(format!("could not prepare this account's profile: {e}")))?;
+        // Games beyond the second need their own copy of Mocktail's binary. Prepare every
+        // copy up to this slot, so a slot freed by another game is ready too.
+        if slots::needs_copy(likely_slot) {
+            let installed = installed_binary()?;
+            for slot in (0..=likely_slot).filter(|s| slots::needs_copy(*s)) {
+                slots::prepare(&installed, &slots::slot_dir(&data, slot))
+                    .map_err(|e| AppError::Launch(format!("could not prepare another copy of Mocktail: {e}")))?;
+            }
+        }
         Ok((cookie, profile))
     })
     .await
@@ -164,11 +186,15 @@ pub async fn launch(
     // Re-check under the lock: another launch may have taken the slot meanwhile.
     let mut m = manager.lock().unwrap();
     let used: Vec<(usize, u64)> = m.instances.iter().map(|i| (i.slot, i.account.id)).collect();
-    let slot = pick_slot(&used, account.id, &account.display_name)?;
+    // Never above the slot whose copy was prepared; lower slots are prepared too.
+    let slot = pick_slot(&used, account.id, &account.display_name)?.min(likely_slot);
+    if used.iter().any(|(s, _)| *s == slot) {
+        return Err(AppError::Launch("another game took that slot. Press Play again.".into()));
+    }
 
     let mut cmd = Command::new("flatpak");
     cmd.arg("run");
-    if let Some(command) = SLOT_COMMANDS[slot] {
+    if let Some(command) = slots::command(&flatpak_data()?, slot) {
         cmd.arg(format!("--command={command}"));
     }
     cmd.args([APP_ID, &uri])
@@ -343,7 +369,6 @@ mod tests {
     #[test]
     fn first_game_takes_the_default_slot() {
         assert_eq!(pick_slot(&[], 1, "A").unwrap(), 0);
-        assert_eq!(SLOT_COMMANDS[0], None);
     }
 
     #[test]
@@ -359,13 +384,15 @@ mod tests {
     }
 
     #[test]
-    fn no_third_game() {
-        let err = pick_slot(&[(0, 1), (1, 2)], 3, "C").unwrap_err();
-        assert!(err.to_string().contains("2 games at once"));
+    fn further_games_take_the_next_free_slot() {
+        assert_eq!(pick_slot(&[(0, 1), (1, 2)], 3, "C").unwrap(), 2);
+        assert_eq!(pick_slot(&[(0, 1), (2, 3)], 4, "D").unwrap(), 1);
     }
 
     #[test]
-    fn slots_use_different_executable_paths() {
-        assert_ne!(SLOT_COMMANDS[0], SLOT_COMMANDS[1]);
+    fn there_is_an_upper_limit() {
+        let full: Vec<(usize, u64)> = (0..slots::MAX_INSTANCES).map(|s| (s, s as u64 + 1)).collect();
+        let err = pick_slot(&full, 99, "Z").unwrap_err();
+        assert!(err.to_string().contains("at most 10 games"));
     }
 }

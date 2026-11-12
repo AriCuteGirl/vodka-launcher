@@ -42,9 +42,9 @@
     </p>
     <div class="row">
       <div class="grow">
-        <b>Two games at once</b>
+        <b>Several games at once</b>
         <p class="faint">
-          {app.settings.multiInstanceAccepted ? "You accepted the warning. Vodka starts a second game without asking." : "Vodka asks before the first time."}
+          {app.settings.multiInstanceAccepted ? "You accepted the warning. Vodka starts further games without asking, with a short reminder each time." : "Vodka asks before the first time."}
         </p>
       </div>
       {#if app.settings.multiInstanceAccepted}

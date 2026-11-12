@@ -4,6 +4,7 @@
 
 Phase 4 (in progress): social.
 
+- Up to 10 games at once instead of 2: games beyond the second run from their own copy of Mocktail's binary. A five-second reminder shows each time another game is added.
 - Games page: search all of Roblox and browse the public charts, with Play on every tile.
 - Friends page: friends grouped by what they are doing, a filter, friend requests with Accept and Decline, and Join for friends whose server is visible.
 - The right rail lists friends who are online.

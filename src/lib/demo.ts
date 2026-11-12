@@ -118,10 +118,10 @@ function launch(game: Game, account: Account): number {
   if (instances.some((i) => i.accountId === account.id)) {
     throw { kind: "launch", message: `Mocktail could not be started: ${account.displayName} is already in a game. Close it, or switch to another account.` };
   }
-  if (instances.length >= 2) throw { kind: "launch", message: "Mocktail could not be started: Vodka can run 2 games at once, and all are in use." };
+  if (instances.length >= 10) throw { kind: "launch", message: "Mocktail could not be started: Vodka runs at most 10 games at once. Close one first." };
   const inst: Instance = {
     id: nextId++,
-    slot: instances.some((i) => i.slot === 0) ? 1 : 0,
+    slot: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].find((s) => !instances.some((i) => i.slot === s)) ?? 0,
     accountId: account.id,
     accountName: account.displayName,
     game,

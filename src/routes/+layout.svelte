@@ -9,7 +9,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
-  import { acceptMultiInstance, app, boot, play } from "$lib/state.svelte";
+  import { acceptMultiInstance, app, boot, MAX_INSTANCES, play } from "$lib/state.svelte";
   import { onMount } from "svelte";
 
   let { children } = $props();
@@ -67,7 +67,7 @@
 {/if}
 
 {#if app.pendingLaunch}
-  <Modal title="Run two games at once?" onclose={() => (app.pendingLaunch = null)}>
+  <Modal title="Run several games at once?" onclose={() => (app.pendingLaunch = null)}>
     <div class="warn">
       <p>
         You're about to start <b>{app.pendingLaunch.name}</b> while another game is running. Before you do:
@@ -75,7 +75,7 @@
       <ul>
         <li>Roblox's Terms of Use don't allow working around its limit on running clients. Accounts that do can be restricted or banned.</li>
         <li>Mocktail's developers chose not to support this. If it breaks, it's on Vodka, not on them.</li>
-        <li>Vodka runs one game per account, two at most.</li>
+        <li>Vodka runs one game per account, up to {MAX_INSTANCES}. Each needs about 1.5 GB of memory.</li>
       </ul>
       <p class="faint">This is your call and your risk. Vodka asks once and remembers the answer.</p>
     </div>

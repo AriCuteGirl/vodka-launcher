@@ -80,7 +80,7 @@
     </header>
     {#if app.instances.length === 0}
       <StateCard icon="games" title="Nothing is running">
-        Press Play on Home. To run a second game, switch to another account and press Play again.
+        Press Play on Home. To run another game at the same time, switch to another account and press Play again.
       </StateCard>
     {:else}
       <ul class="instances">

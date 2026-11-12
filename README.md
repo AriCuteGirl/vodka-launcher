@@ -13,12 +13,12 @@ A Roblox launcher for Linux. Vodka is the front end; [Mocktail](https://github.c
 - Shows "Continue playing" and "Favorites" with a Play button that starts Mocktail in that game.
 - Shows Mocktail's output while it starts, and the reason if it crashes.
 - Keeps several accounts, each with its own isolated Mocktail profile, and switches between them.
-- Runs up to two games at once, one per account, with FPS, CPU and memory per game.
+- Runs several games at once (up to 10), one per account, with FPS, CPU and memory per game.
 - Searches all of Roblox and shows the public charts.
 - Shows your friends, what they're playing, and friend requests; joins a friend's server when Roblox shares it.
 - Sets frame rate, graphics and FFlags for all accounts or per account, and can hold or roll back the Roblox client.
 
-Running two Roblox clients at once is not supported by Mocktail's developers and is against Roblox's Terms of Use. Vodka warns
+Running more than one Roblox client at once is not supported by Mocktail's developers and is against Roblox's Terms of Use. Vodka warns
 before the first time; the risk to your accounts is yours.
 
 Not yet: AUR, system-package and AppImage installs of Mocktail are not detected.
