@@ -12,16 +12,31 @@
     { href: "/friends", label: "Friends", icon: "friends" },
     { href: "/chat", label: "Chat", icon: "chat" },
   ];
+  // Remembered between starts; a wide sidebar shows each page's name next to its icon.
+  let open = $state(typeof localStorage !== "undefined" && localStorage.getItem("vodka-sidebar") === "open");
+  function toggle() {
+    open = !open;
+    try {
+      localStorage.setItem("vodka-sidebar", open ? "open" : "closed");
+    } catch {
+      // It just won't be remembered.
+    }
+  }
   const active = (href: string) => (href === "/" ? page.url.pathname === "/" : page.url.pathname.startsWith(href));
 </script>
 
-<nav class="sidebar" aria-label="Main">
+<nav class="sidebar" class:open aria-label="Main">
+  <button class="toggle" onclick={toggle} aria-expanded={open} aria-label={open ? "Collapse the sidebar" : "Expand the sidebar to show page names"}>
+    <Icon name="menu" size={19} />
+    <span class="text">Menu</span>
+  </button>
   <ul>
     {#each items as item (item.href)}
       <li>
         <a href={item.href} class:active={active(item.href)} aria-current={active(item.href) ? "page" : undefined} aria-label={item.label}>
           <Icon name={item.icon} size={19} />
           {#if item.href === "/chat" && chat.unreadTotal > 0}<i class="badge">{chat.unreadTotal > 9 ? "9+" : chat.unreadTotal}</i>{/if}
+          <span class="text">{item.label}</span>
           <span class="tip" aria-hidden="true">{item.label}</span>
         </a>
       </li>
@@ -29,6 +44,7 @@
   </ul>
   <a href="/settings" class="bottom" class:active={active("/settings")} aria-current={active("/settings") ? "page" : undefined} aria-label="Settings">
     <Icon name="settings" size={19} />
+    <span class="text">Settings</span>
     <span class="tip" aria-hidden="true">Settings</span>
   </a>
 </nav>
@@ -82,6 +98,67 @@
     border-radius: 0 3px 3px 0;
     background: var(--frost);
     box-shadow: 0 0 12px var(--frost-strong);
+  }
+  .sidebar {
+    transition: width var(--slow) var(--ease);
+  }
+  .sidebar.open {
+    width: 200px;
+    align-items: stretch;
+    padding-left: var(--s-2);
+    padding-right: var(--s-2);
+  }
+  .toggle {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .toggle:hover {
+    color: var(--text-0);
+    background: var(--glass-hover);
+  }
+  .text {
+    display: none;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .open .text {
+    display: inline;
+  }
+  a {
+    text-decoration: none;
+  }
+  .open a,
+  .open .toggle {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--s-3);
+    width: 100%;
+    padding: 0 10px;
+  }
+  .open .toggle {
+    color: var(--text-1);
+  }
+  /* Names are on screen, so the hover labels would only repeat them. */
+  .open .tip {
+    display: none;
+  }
+  .open .badge {
+    position: static;
+    margin-left: auto;
+    order: 3;
+  }
+  .open a.active::before {
+    left: calc(var(--s-2) * -1);
   }
   .badge {
     position: absolute;
