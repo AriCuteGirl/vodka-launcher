@@ -68,8 +68,15 @@ fn pick_active(saved: &Settings, chosen: Option<u64>) -> Option<SavedAccount> {
 
 fn active_account(app: &AppHandle) -> Result<Option<SavedAccount>> {
     let saved = settings::load(&config_dir(app)?);
-    let chosen = *app.state::<AppState>().active.lock().unwrap();
-    Ok(pick_active(&saved, chosen))
+    let state = app.state::<AppState>();
+    let mut chosen = state.active.lock().unwrap();
+    let account = pick_active(&saved, *chosen);
+    // Pin the first answer. Otherwise a window that never switched would follow whatever
+    // another Vodka window last saved, and start acting as that window's account.
+    if chosen.is_none() {
+        *chosen = account.as_ref().map(|a| a.id);
+    }
+    Ok(account)
 }
 
 async fn active_cookie(app: &AppHandle) -> Result<(SavedAccount, String)> {
@@ -131,7 +138,7 @@ async fn list_accounts(app: AppHandle, state: State<'_, AppState>) -> Result<Vec
     };
     let running = instances::running_account_ids(&state.instances);
     let data = flatpak_data()?;
-    let active_id = pick_active(&saved, *state.active.lock().unwrap()).map(|a| a.id);
+    let active_id = active_account(&app)?.map(|a| a.id);
     Ok(saved
         .accounts
         .iter()
@@ -246,7 +253,7 @@ async fn prepare_launch(app: &AppHandle, account_id: Option<u64>) -> Result<(Sav
     let saved = settings::load(&config_dir(app)?);
     let account = match account_id {
         Some(id) => saved.accounts.iter().find(|a| a.id == id).cloned(),
-        None => pick_active(&saved, *app.state::<AppState>().active.lock().unwrap()),
+        None => active_account(app)?,
     }
     .ok_or(AppError::NotSignedIn)?;
     let options = tweaks::modernize(tweaks::effective(&saved.defaults, saved.account_options.get(&account.id)));

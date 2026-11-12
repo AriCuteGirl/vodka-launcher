@@ -234,7 +234,13 @@
     margin: 0;
     padding-left: var(--s-5);
   }
-  @media (max-width: 860px) {
+  /* Chat needs the width for its two panes: the rail steps aside sooner there. */
+  @media (max-width: 1500px) {
+    .body:has(:global(.chat .panes)) :global(.rail) {
+      display: none;
+    }
+  }
+  @media (max-width: 1000px) {
     .body :global(.rail) {
       display: none;
     }

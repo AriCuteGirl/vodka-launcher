@@ -543,7 +543,7 @@
   }
   .panes {
     display: grid;
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
     gap: var(--s-3);
     min-height: 0;
     height: 100%;
