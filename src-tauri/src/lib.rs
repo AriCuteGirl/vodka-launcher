@@ -516,6 +516,13 @@ async fn catalog_search(state: State<'_, AppState>, keyword: String, category: u
     Ok(ItemPage { items, next })
 }
 
+/// The active account's Robux balance.
+#[tauri::command]
+async fn robux_balance(app: AppHandle, state: State<'_, AppState>) -> Result<u64> {
+    let (account, cookie) = active_cookie(&app).await?;
+    state.api.robux(&cookie, account.id).await
+}
+
 /// What buying an item would involve for the active account: price, balance, whether it's possible. Changes nothing.
 #[tauri::command]
 async fn item_offer(app: AppHandle, state: State<'_, AppState>, asset_id: u64) -> Result<roblox_api::Offer> {
@@ -832,6 +839,7 @@ pub fn run() {
             avatar_set_accessories,
             avatar_save_outfit,
             catalog_search,
+            robux_balance,
             item_offer,
             buy_item,
             headshots,

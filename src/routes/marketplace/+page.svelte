@@ -5,7 +5,7 @@
   import Modal from "$lib/components/Modal.svelte";
   import Skeleton from "$lib/components/Skeleton.svelte";
   import StateCard from "$lib/components/StateCard.svelte";
-  import { app, signIn, toast } from "$lib/state.svelte";
+  import { app, refreshRobux, signIn, toast } from "$lib/state.svelte";
   import { toAppError, type Item, type Loadable, type Offer } from "$lib/types";
 
   const CATEGORIES = [
@@ -98,6 +98,7 @@
       const after = await api.buyItem(item.id, price);
       offer = { status: "ready", data: after };
       justBought = true;
+      void refreshRobux();
       toast(`Bought ${item.name} for ${price.toLocaleString()} Robux.`, "ok");
     } catch (e) {
       toast(toAppError(e).message, "danger");

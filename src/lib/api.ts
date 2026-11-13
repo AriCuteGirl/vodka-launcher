@@ -59,6 +59,7 @@ export const api = {
   avatarSaveOutfit: (name: string) => call<void>("avatar_save_outfit", { name }),
   catalogSearch: (keyword: string, category: number, sort: number, cursor: string | null = null) =>
     call<ItemPage>("catalog_search", { keyword, category, sort, cursor }),
+  robuxBalance: () => call<number>("robux_balance"),
   itemOffer: (assetId: number) => call<Offer>("item_offer", { assetId }),
   buyItem: (assetId: number, agreedPrice: number) => call<Offer>("buy_item", { assetId, agreedPrice }),
   headshots: (userIds: number[]) => call<Record<string, string>>("headshots", { userIds }),

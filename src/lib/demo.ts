@@ -399,6 +399,8 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return [];
     case "headshots":
       return {};
+    case "robux_balance":
+      return demoRobux;
     case "item_offer":
       await wait(350);
       return demoOffer(args.assetId as number);

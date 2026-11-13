@@ -58,6 +58,11 @@
       <kbd>Ctrl K</kbd>
     </label>
 
+    {#if app.account && app.robux != null}
+      <a class="robux" href="/marketplace" title="Your Robux. Click to open the Marketplace." aria-label="{app.robux.toLocaleString()} Robux">
+        <Icon name="robux" size={15} /><span>{app.robux.toLocaleString()}</span>
+      </a>
+    {/if}
     <div class="account">
       {#if app.account}
         <button
@@ -195,6 +200,25 @@
     border: 1px solid var(--line);
     color: var(--text-2);
     white-space: nowrap;
+  }
+  .robux {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--line);
+    background: var(--glass);
+    color: var(--frost);
+    font-size: var(--fs-sm);
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    text-decoration: none;
+  }
+  .robux:hover {
+    background: var(--glass-hover);
+    border-color: var(--line-strong);
   }
   .account {
     position: relative;

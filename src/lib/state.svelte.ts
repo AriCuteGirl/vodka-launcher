@@ -19,6 +19,8 @@ export const app = $state({
   settings: { onboarded: false, activeAccount: null, multiInstanceAccepted: false, defaults: { ...NO_OPTIONS }, accountOptions: {} } as Settings,
   /** The active account, confirmed by Roblox. */
   account: null as User | null,
+  /** The active account's Robux; null while unknown. */
+  robux: null as number | null,
   accounts: [] as Account[],
   instances: [] as Instance[],
   mocktail: null as MocktailStatus | null,
@@ -62,6 +64,21 @@ export function myInstance(): Instance | null {
 export function phaseOf(game: Game): "idle" | "starting" | "playing" {
   const mine = myInstance();
   return mine && mine.game.universeId === game.universeId ? mine.phase : "idle";
+}
+
+/** Reads the active account's Robux balance. Quiet on failure: it's a convenience, not something to interrupt for. */
+export async function refreshRobux() {
+  const forAccount = app.account?.id;
+  if (forAccount == null) {
+    app.robux = null;
+    return;
+  }
+  try {
+    const amount = await api.robuxBalance();
+    if (app.account?.id === forAccount) app.robux = amount;
+  } catch {
+    if (app.account?.id === forAccount) app.robux = null;
+  }
 }
 
 export async function refreshMocktail() {
@@ -137,6 +154,8 @@ async function reloadActiveAccount() {
     app.account = null;
   }
   await refreshAccounts();
+  app.robux = null;
+  void refreshRobux();
   void loadHome();
   void refreshFriends();
 }
@@ -359,6 +378,12 @@ function onExit(event: ExitEvent) {
 
 /** Loads everything the shell needs and wires backend events. Call once. */
 export async function boot() {
+  // This is an app, not a web page: no browser menu with Back, Reload and the like.
+  // Text boxes keep theirs, so copy and paste by mouse still work.
+  window.addEventListener("contextmenu", (e) => {
+    const target = e.target as HTMLElement | null;
+    if (!target?.closest("input, textarea, [contenteditable]")) e.preventDefault();
+  });
   window.addEventListener("online", () => (app.online = true));
   window.addEventListener("offline", () => (app.online = false));
   await api.onInstancesChanged(() => {
@@ -372,6 +397,8 @@ export async function boot() {
     app.account = user;
     toast(`Signed in as ${user.displayName}.`, "ok");
     void refreshAccounts();
+    app.robux = null;
+    void refreshRobux();
     void loadHome();
     void refreshFriends();
   });
@@ -380,6 +407,8 @@ export async function boot() {
     app.signingIn = false;
     toast(error.message, "danger");
   });
+  // Robux change when you buy, sell or get paid elsewhere; every two minutes is plenty.
+  setInterval(() => app.account && app.online && void refreshRobux(), 120_000);
   // Friends come and go; once a minute keeps the rail fresh without leaning on Roblox.
   setInterval(() => app.account && app.online && void refreshFriends(true), 60_000);
   // You can switch games inside Roblox; ask where each playing account really is now and then.
