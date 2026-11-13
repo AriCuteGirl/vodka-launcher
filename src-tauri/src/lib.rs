@@ -242,7 +242,7 @@ fn link_for(game: &Game, target: Option<&Target>) -> Result<String> {
 }
 
 /// Checks Mocktail is there and works out who is playing (the active account unless one is named) with which options.
-async fn prepare_launch(app: &AppHandle, account_id: Option<u64>) -> Result<(SavedAccount, Vec<(&'static str, String)>)> {
+async fn prepare_launch(app: &AppHandle, account_id: Option<u64>) -> Result<(SavedAccount, Vec<(&'static str, String)>, bool)> {
     let status = blocking(|| Ok(mocktail::detect::detect())).await?;
     if !status.flatpak_available {
         return Err(AppError::FlatpakMissing);
@@ -259,7 +259,7 @@ async fn prepare_launch(app: &AppHandle, account_id: Option<u64>) -> Result<(Sav
     let options = tweaks::modernize(tweaks::effective(&saved.defaults, saved.account_options.get(&account.id)));
     // Saved options were validated when they were saved; check again in case the file was edited by hand.
     let options = tweaks::validate(&options).map_err(AppError::Launch)?;
-    Ok((account, tweaks::to_env(&options)))
+    Ok((account, tweaks::to_env(&options), options.auto_rejoin == Some(true)))
 }
 
 /// Starts a game as the active account, or as `account_id`, optionally in a chosen server.
@@ -272,8 +272,8 @@ async fn launch_game(
     target: Option<Target>,
 ) -> Result<u32> {
     let uri = link_for(&game, target.as_ref())?;
-    let (account, env) = prepare_launch(&app, account_id).await?;
-    instances::launch(app, state.instances.clone(), account, game, uri, env).await
+    let (account, env, auto_rejoin) = prepare_launch(&app, account_id).await?;
+    instances::launch(app, state.instances.clone(), account, game, uri, env, auto_rejoin).await
 }
 
 #[derive(Debug, Serialize)]
@@ -373,10 +373,10 @@ async fn answer_friend_request(app: AppHandle, state: State<'_, AppState>, user_
 /// so a friend who just left is reported instead of joined.
 #[tauri::command]
 async fn join_friend(app: AppHandle, state: State<'_, AppState>, user_id: u64) -> Result<u32> {
-    let (account, env) = prepare_launch(&app, None).await?;
+    let (account, env, auto_rejoin) = prepare_launch(&app, None).await?;
     let at = locate_friend(&app, &state.api, user_id).await?;
     let uri = mocktail::launch::join_uri(at.place_id, &at.game_id);
-    instances::launch(app, state.instances.clone(), account, at.game, uri, env).await
+    instances::launch(app, state.instances.clone(), account, at.game, uri, env, auto_rejoin).await
 }
 
 /// Players can switch games inside Roblox without Vodka knowing. This asks Roblox where each
@@ -386,6 +386,13 @@ async fn refresh_instance_games(app: AppHandle, state: State<'_, AppState>) -> R
     let mut changed = false;
     for (instance_id, account_id, universe_id) in instances::running_games(&state.instances) {
         let Some(here) = own_presence(&app, &state.api, account_id).await else { continue };
+        // Out of the game for two checks in a row, with auto-rejoin on: bring the account back.
+        if instances::note_presence(&state.instances, instance_id, here.kind == "in_game") {
+            let manager = state.instances.clone();
+            let _ = blocking(move || instances::stop_for_rejoin(&manager, instance_id)).await;
+            changed = true;
+            continue;
+        }
         let (Some(now_universe), Some(place)) = (here.universe_id, here.root_place_id.or(here.place_id)) else { continue };
         if here.kind != "in_game" || now_universe == universe_id {
             continue;

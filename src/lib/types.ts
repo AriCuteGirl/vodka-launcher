@@ -235,6 +235,8 @@ export interface ExitEvent {
   report: ExitReport;
   log: string[];
   restarting: boolean;
+  /** Why Vodka is bringing the game back by itself, or "limit" when it stopped trying. */
+  rejoin: "crash" | "disconnect" | "limit" | null;
 }
 
 /** `null` means "don't override": the account falls back to the defaults, the defaults to Mocktail's own config. */
@@ -247,6 +249,8 @@ export interface LaunchOptions {
   gamemode: string | null;
   memoryLimitMb: number | null;
   holdUpdates: boolean | null;
+  /** Start the game again by itself after a crash or disconnect. */
+  autoRejoin: boolean | null;
   fflags: Record<string, string>;
 }
 
@@ -259,6 +263,7 @@ export const NO_OPTIONS: LaunchOptions = {
   gamemode: null,
   memoryLimitMb: null,
   holdUpdates: null,
+  autoRejoin: null,
   fflags: {},
 };
 

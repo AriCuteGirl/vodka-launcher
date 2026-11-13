@@ -11,7 +11,7 @@ pub mod slots;
 use crate::accounts;
 use crate::error::{AppError, Result};
 use crate::mocktail::detect::APP_ID;
-use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, parse_present_sample, redact};
+use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, launch_uri, parse_present_sample, redact};
 use crate::roblox_api::Game;
 use crate::settings::SavedAccount;
 use profiles::ProfilePaths;
@@ -36,6 +36,14 @@ struct Instance {
     started_at_ms: u64,
     playing: bool,
     restart: bool,
+    /// The user (or Vodka itself) asked this game to stop, so its exit is not a crash.
+    stopping: bool,
+    /// Come back by itself after a crash or disconnect.
+    auto_rejoin: bool,
+    /// Set when Vodka stops the game because Roblox says the account is no longer in it.
+    disconnected: bool,
+    /// How many presence checks in a row said "not in a game".
+    absent_checks: u8,
     log: VecDeque<String>,
     profile: ProfilePaths,
     sample: Option<(Instant, u64)>,
@@ -52,6 +60,25 @@ struct Instance {
 pub struct Manager {
     next_id: u32,
     instances: Vec<Instance>,
+    /// When each account was last brought back automatically, to stop a crash loop.
+    rejoins: Vec<(u64, Instant)>,
+}
+
+const REJOIN_LIMIT: usize = 5;
+const REJOIN_WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// A game must have been up this long before a "not in a game" answer counts as a disconnect.
+const SETTLE_MS: u64 = 120_000;
+const ABSENT_CHECKS_FOR_REJOIN: u8 = 2;
+
+/// Whether another automatic rejoin is allowed for this account: at most five in fifteen minutes.
+pub fn rejoin_allowed(history: &[(u64, Instant)], account_id: u64, now: Instant) -> bool {
+    history.iter().filter(|(id, at)| *id == account_id && now.duration_since(*at) < REJOIN_WINDOW).count() < REJOIN_LIMIT
+}
+
+/// The link to come back with. A specific public server may be gone by then, so only
+/// private-server links are kept; everything else rejoins the game on any server.
+pub fn rejoin_uri(original: &str, place_id: u64) -> String {
+    if original.contains("accessCode=") { original.to_owned() } else { launch_uri(place_id) }
 }
 
 pub type SharedManager = Arc<Mutex<Manager>>;
@@ -83,6 +110,8 @@ struct ExitEvent {
     report: ExitReport,
     log: Vec<String>,
     restarting: bool,
+    /// Why Vodka is (or isn't) bringing the game back: "crash", "disconnect", or "limit" when it gave up.
+    rejoin: Option<&'static str>,
 }
 
 /// Which slot a new game may take, or why it can't start.
@@ -160,6 +189,7 @@ pub async fn launch(
     game: Game,
     uri: String,
     env: Vec<(&'static str, String)>,
+    auto_rejoin: bool,
 ) -> Result<u32> {
     // A quick answer for the common case; the lock files below are what actually decides.
     let used: Vec<(usize, u64)> = manager.lock().unwrap().instances.iter().map(|i| (i.slot, i.account.id)).collect();
@@ -224,6 +254,10 @@ pub async fn launch(
         started_at_ms: now_ms(),
         playing: false,
         restart: false,
+        stopping: false,
+        auto_rejoin,
+        disconnected: false,
+        absent_checks: 0,
         log: VecDeque::new(),
         profile,
         sample: None,
@@ -256,11 +290,29 @@ pub async fn launch(
         profiles::clear_session_copy(&inst.profile);
         let log: Vec<String> = inst.log.iter().cloned().collect();
         let report = match status {
-            Ok(st) if inst.restart => ExitReport { code: st.code(), outcome: "closed", detail: None },
+            Ok(st) if inst.stopping => ExitReport { code: st.code(), outcome: "closed", detail: None },
             Ok(st) => classify_exit(st.code(), &log),
             Err(e) => ExitReport { code: None, outcome: "crashed", detail: Some(e.to_string()) },
         };
         let report = explain_kill(report, &inst.env);
+
+        // Decide whether Vodka brings the game back by itself.
+        let wants_rejoin = inst.auto_rejoin && (inst.disconnected || (!inst.stopping && report.outcome == "crashed"));
+        let rejoin = if !wants_rejoin {
+            None
+        } else {
+            let mut m = manager.lock().unwrap();
+            let now = Instant::now();
+            m.rejoins.retain(|(_, at)| now.duration_since(*at) < REJOIN_WINDOW);
+            if rejoin_allowed(&m.rejoins, inst.account.id, now) {
+                m.rejoins.push((inst.account.id, now));
+                Some(if inst.disconnected { "disconnect" } else { "crash" })
+            } else {
+                Some("limit")
+            }
+        };
+        let rejoining = matches!(rejoin, Some("crash" | "disconnect"));
+        let restarting = (inst.restart && !inst.disconnected) || rejoining;
         let _ = app.emit(
             "instances://exit",
             ExitEvent {
@@ -269,12 +321,20 @@ pub async fn launch(
                 account_name: inst.account.display_name.clone(),
                 report,
                 log: log.iter().rev().take(12).rev().cloned().collect(),
-                restarting: inst.restart,
+                restarting,
+                rejoin,
             },
         );
         let _ = app.emit("instances://changed", ());
-        if inst.restart {
-            if let Err(e) = launch_boxed(app.clone(), manager, inst.account, inst.game, inst.uri, inst.env).await {
+        if restarting {
+            let uri = if rejoining {
+                // Give a crashed client a moment to let go of its files and its slot.
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                rejoin_uri(&inst.uri, inst.game.place_id)
+            } else {
+                inst.uri
+            };
+            if let Err(e) = launch_boxed(app.clone(), manager, inst.account, inst.game, uri, inst.env, inst.auto_rejoin).await {
                 let _ = app.emit("instances://error", e);
             }
         }
@@ -307,8 +367,9 @@ fn launch_boxed(
     game: Game,
     uri: String,
     env: Vec<(&'static str, String)>,
+    auto_rejoin: bool,
 ) -> LaunchFuture {
-    Box::pin(launch(app, manager, account, game, uri, env))
+    Box::pin(launch(app, manager, account, game, uri, env, auto_rejoin))
 }
 
 /// Asks an instance's whole process tree to stop. With `restart`, it is started again once it has closed.
@@ -321,6 +382,7 @@ pub fn stop(manager: &SharedManager, id: u32, restart: bool) -> Result<()> {
             .find(|i| i.id == id)
             .ok_or_else(|| AppError::Other("That game has already closed.".into()))?;
         inst.restart = restart;
+        inst.stopping = true;
         inst.pid
     };
     if pid == 0 {
@@ -377,6 +439,28 @@ pub fn list(manager: &SharedManager) -> Vec<InstanceView> {
         .collect()
 }
 
+/// Records one presence answer for a running game. Returns true when the account has been out of
+/// the game long enough that Vodka should bring it back (and auto-rejoin is on for it).
+pub fn note_presence(manager: &SharedManager, id: u32, in_game: bool) -> bool {
+    let mut m = manager.lock().unwrap();
+    let Some(inst) = m.instances.iter_mut().find(|i| i.id == id) else { return false };
+    let settled = inst.playing && now_ms().saturating_sub(inst.started_at_ms) >= SETTLE_MS;
+    if in_game || !settled || !inst.auto_rejoin || inst.stopping {
+        inst.absent_checks = 0;
+        return false;
+    }
+    inst.absent_checks = inst.absent_checks.saturating_add(1);
+    inst.absent_checks >= ABSENT_CHECKS_FOR_REJOIN
+}
+
+/// Stops a game whose account was disconnected, so the exit handler starts it again.
+pub fn stop_for_rejoin(manager: &SharedManager, id: u32) -> Result<()> {
+    if let Some(inst) = manager.lock().unwrap().instances.iter_mut().find(|i| i.id == id) {
+        inst.disconnected = true;
+    }
+    stop(manager, id, true)
+}
+
 /// (instance id, account id, universe id) of every running game, for checking where each account really is.
 pub fn running_games(manager: &SharedManager) -> Vec<(u32, u64, u64)> {
     manager.lock().unwrap().instances.iter().map(|i| (i.id, i.account.id, i.game.universe_id)).collect()
@@ -429,6 +513,25 @@ mod tests {
         assert_eq!(explain_kill(killed.clone(), &[]), killed);
         let clean = ExitReport { code: Some(0), outcome: "closed", detail: None };
         assert_eq!(explain_kill(clean.clone(), &[("MOCKTAIL_MEMORY_LIMIT_MB", "4096".into())]), clean);
+    }
+
+    #[test]
+    fn rejoins_are_capped_per_account() {
+        let now = Instant::now();
+        let recent = |n: usize, id: u64| vec![(id, now); n];
+        assert!(rejoin_allowed(&[], 1, now));
+        assert!(rejoin_allowed(&recent(4, 1), 1, now));
+        assert!(!rejoin_allowed(&recent(5, 1), 1, now));
+        // Another account's rejoins don't count against this one.
+        assert!(rejoin_allowed(&recent(5, 2), 1, now));
+    }
+
+    #[test]
+    fn rejoining_drops_a_specific_public_server_but_keeps_a_private_one() {
+        assert_eq!(rejoin_uri("roblox://experiences/start?placeId=5&gameInstanceId=abc", 5), "roblox://experiences/start?placeId=5");
+        assert_eq!(rejoin_uri("roblox://experiences/start?placeId=5", 5), "roblox://experiences/start?placeId=5");
+        let private = "roblox://experiences/start?placeId=5&accessCode=zz";
+        assert_eq!(rejoin_uri(private, 5), private);
     }
 
     #[test]

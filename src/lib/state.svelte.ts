@@ -365,7 +365,17 @@ export async function stopInstance(id: number, restart = false) {
 }
 
 function onExit(event: ExitEvent) {
-  if (event.restarting) {
+  if (event.rejoin === "crash") {
+    toast(`${event.game.name} crashed for ${event.accountName}. Rejoining in a few seconds.`, "danger", 7000);
+  } else if (event.rejoin === "disconnect") {
+    toast(`${event.accountName} was disconnected from ${event.game.name}. Rejoining.`, "danger", 7000);
+  } else if (event.rejoin === "limit") {
+    // Five automatic rejoins in fifteen minutes means something is wrong; stop and say so.
+    app.crash = {
+      ...event,
+      report: { ...event.report, outcome: "crashed", detail: `${event.report.detail ?? "The game keeps closing."} Vodka rejoined 5 times in 15 minutes and has stopped trying.` },
+    };
+  } else if (event.restarting) {
     toast(`Restarting ${event.game.name}…`);
   } else if (event.report.outcome === "forwarded") {
     toast(`Sent ${event.game.name} to a Mocktail window that was already open.`, "ok");

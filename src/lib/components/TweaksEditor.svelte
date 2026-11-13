@@ -217,6 +217,15 @@
       <small>Doesn't make Roblox use less. Mocktail closes the game if it goes over, so leave room for spikes.</small>
     </label>
     <label>
+      <span>If the game crashes or disconnects</span>
+      <select value={draft.autoRejoin == null ? "" : draft.autoRejoin ? "on" : "off"} onchange={(e) => set("autoRejoin", tri(e.currentTarget.value))}>
+        <option value="">{scope == null ? "Do nothing" : inherit}</option>
+        <option value="on">Rejoin automatically</option>
+        {#if scope != null}<option value="off">Do nothing</option>{/if}
+      </select>
+      <small>Starts the same game again, up to 5 times in 15 minutes. Closing a game yourself never triggers it.</small>
+    </label>
+    <label>
       <span>Roblox client updates</span>
       <select value={draft.holdUpdates == null ? "" : draft.holdUpdates ? "on" : "off"} onchange={(e) => set("holdUpdates", tri(e.currentTarget.value))}>
         <option value="">{inherit}</option>

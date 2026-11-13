@@ -5,6 +5,10 @@
 Phase 4 (in progress): social.
 
 - Up to 10 games at once instead of 2: games beyond the second run from their own copy of Mocktail's binary. A five-second reminder shows each time another game is added.
+- Auto-rejoin (off by default, per account or for all): a game that crashes or gets disconnected is started again, up to 5 times in 15 minutes.
+- Closing a game from Vodka is no longer reported as a crash.
+- Your Robux balance shows in the title strip.
+- The browser-style right-click menu is gone outside text boxes.
 - Marketplace: search and filter the avatar catalog, with prices, details, and copy ID or link.
 - Buying from the Marketplace: fixed-price items only, behind a confirmation that shows the price and your balance. The purchase is refused if the price changed since you looked.
 - Fixed: Settings showed "500 Internal Error" because the Performance form reloaded itself in a loop.

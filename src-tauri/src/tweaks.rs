@@ -32,6 +32,8 @@ pub struct LaunchOptions {
     pub memory_limit_mb: Option<u32>,
     /// Keep the current Roblox client instead of updating on launch.
     pub hold_updates: Option<bool>,
+    /// Start the game again by itself after a crash or a disconnect.
+    pub auto_rejoin: Option<bool>,
     pub fflags: BTreeMap<String, String>,
 }
 
@@ -133,6 +135,7 @@ pub fn effective(defaults: &LaunchOptions, account: Option<&LaunchOptions>) -> L
         gamemode: a.gamemode.clone().or_else(|| defaults.gamemode.clone()),
         memory_limit_mb: a.memory_limit_mb.or(defaults.memory_limit_mb),
         hold_updates: a.hold_updates.or(defaults.hold_updates),
+        auto_rejoin: a.auto_rejoin.or(defaults.auto_rejoin),
         fflags,
     }
 }
@@ -274,6 +277,8 @@ mod tests {
     fn unset_options_add_no_environment() {
         assert!(to_env(&LaunchOptions::default()).is_empty());
         assert!(to_env(&LaunchOptions { hold_updates: Some(false), ..Default::default() }).is_empty());
+        // Auto-rejoin is Vodka's own behaviour; Mocktail is told nothing about it.
+        assert!(to_env(&LaunchOptions { auto_rejoin: Some(true), ..Default::default() }).is_empty());
     }
 
     #[test]

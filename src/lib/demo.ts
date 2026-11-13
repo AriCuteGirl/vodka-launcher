@@ -144,7 +144,7 @@ export function demoListen(name: string, handler: Listener): () => void {
 
 function exit(inst: Instance, outcome: ExitEvent["report"]["outcome"], detail: string | null, restarting = false) {
   instances = instances.filter((i) => i.id !== inst.id);
-  const event: ExitEvent = { id: inst.id, game: inst.game, accountName: inst.accountName, report: { code: outcome === "crashed" ? 1 : 0, outcome, detail }, log: inst.log, restarting };
+  const event: ExitEvent = { id: inst.id, game: inst.game, accountName: inst.accountName, report: { code: outcome === "crashed" ? 1 : 0, outcome, detail }, log: inst.log, restarting, rejoin: null };
   emit("instances://exit", event);
   emit("instances://changed", null);
 }
