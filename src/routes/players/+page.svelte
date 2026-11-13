@@ -6,11 +6,37 @@
   import StateCard from "$lib/components/StateCard.svelte";
   import { elapsed, memory } from "$lib/format";
   import { app, MAX_INSTANCES, refreshAccounts, removeAccount, signIn, stopInstance, switchAccount, toggleBatch } from "$lib/state.svelte";
-  import type { Account } from "$lib/types";
+  import { api } from "$lib/api";
+  import { toast } from "$lib/state.svelte";
+  import { toAppError, type Account, type Game } from "$lib/types";
   import { onMount } from "svelte";
 
   let now = $state(Date.now());
   let removing = $state<Account | null>(null);
+  let gathering = $state<{ game: Game; count: number } | null>(null);
+  let gatherBusy = $state(false);
+
+  /** Games that this window is running, with how many accounts are in each. */
+  const groups = $derived(
+    Object.values(
+      app.instances.reduce<Record<string, { game: Game; count: number }>>((all, i) => {
+        (all[i.game.universeId] ??= { game: i.game, count: 0 }).count++;
+        return all;
+      }, {}),
+    ),
+  );
+
+  async function gather(game: Game) {
+    gatherBusy = true;
+    try {
+      const r = await api.regroup(game.universeId);
+      toast(`Sending ${r.moved} account${r.moved === 1 ? "" : "s"} to a server with ${r.playing} of ${r.maxPlayers} players. They restart to get there.`, "ok", 7000);
+    } catch (e) {
+      toast(toAppError(e).message, "danger");
+    }
+    gatherBusy = false;
+    gathering = null;
+  }
 
   onMount(() => {
     void refreshAccounts();
@@ -117,10 +143,33 @@
           </li>
         {/each}
       </ul>
+      {#each groups as g (g.game.universeId)}
+        <div class="gather glass">
+          <span><b>{g.game.name}</b> · {g.count} account{g.count === 1 ? "" : "s"} here</span>
+          <Button size="sm" icon="players" onclick={() => (gathering = g)}>
+            {g.count === 1 ? "Move to a quiet server" : `Gather all ${g.count} in a quiet server`}
+          </Button>
+        </div>
+      {/each}
       <p class="faint note">CPU is a share of one core, so a busy game can show more than 100%.</p>
     {/if}
   </section>
 </div>
+
+{#if gathering}
+  {@const g = gathering}
+  <Modal title="Gather in a quiet server?" onclose={() => (gathering = null)}>
+    <p class="muted">
+      Vodka picks the public server of <b>{g.game.name}</b> with the fewest players that still has room for {g.count === 1 ? "this account" : `all ${g.count} accounts`},
+      then restarts {g.count === 1 ? "the game" : "each game"} into it. Restarting is the only way to move a running game from outside, so anything
+      not saved in the game is lost.
+    </p>
+    {#snippet actions()}
+      <Button onclick={() => (gathering = null)} disabled={gatherBusy}>Cancel</Button>
+      <Button variant="primary" busy={gatherBusy} onclick={() => gather(g.game)}>Restart and gather</Button>
+    {/snippet}
+  </Modal>
+{/if}
 
 {#if removing}
   {@const target = removing}
@@ -200,6 +249,18 @@
   .tick input:checked {
     border-color: var(--frost);
     background: var(--frost) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2303202f' stroke-width='3.500' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.500l4.500 4.500L19 7.500'/%3E%3C/svg%3E") center / 14px no-repeat;
+  }
+  .gather {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
+    font-size: var(--fs-sm);
+    color: var(--text-1);
+  }
+  .gather b {
+    color: var(--text-0);
   }
   .selection {
     display: flex;

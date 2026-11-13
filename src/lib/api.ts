@@ -39,6 +39,7 @@ export const api = {
   searchGames: (query: string) => call<Game[]>("search_games", { query }),
   gameCharts: () => call<Chart[]>("game_charts"),
   launchGame: (game: Game, accountId: number | null = null, target: Target | null = null) => call<number>("launch_game", { game, accountId, target }),
+  regroup: (universeId: number) => call<{ moved: number; playing: number; maxPlayers: number }>("regroup", { universeId }),
   listServers: (placeId: number) => call<ServerLists>("list_servers", { placeId }),
   friendLocation: (userId: number) => call<FriendLocation>("friend_location", { userId }),
   listFriends: () => call<Person[]>("list_friends"),

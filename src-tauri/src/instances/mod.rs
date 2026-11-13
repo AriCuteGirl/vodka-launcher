@@ -453,6 +453,14 @@ pub fn note_presence(manager: &SharedManager, id: u32, in_game: bool) -> bool {
     inst.absent_checks >= ABSENT_CHECKS_FOR_REJOIN
 }
 
+/// Restarts a game into a different link (used to move accounts into one server together).
+pub fn restart_into(manager: &SharedManager, id: u32, uri: String) -> Result<()> {
+    if let Some(inst) = manager.lock().unwrap().instances.iter_mut().find(|i| i.id == id) {
+        inst.uri = uri;
+    }
+    stop(manager, id, true)
+}
+
 /// Stops a game whose account was disconnected, so the exit handler starts it again.
 pub fn stop_for_rejoin(manager: &SharedManager, id: u32) -> Result<()> {
     if let Some(inst) = manager.lock().unwrap().instances.iter_mut().find(|i| i.id == id) {

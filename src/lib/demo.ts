@@ -247,6 +247,9 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       if (!a) throw { kind: "not_signed_in", message: "You're not signed in to Roblox." };
       return launch(args.game as Game, a);
     }
+    case "regroup":
+      await wait(500);
+      return { moved: instances.filter((i) => i.game.universeId === args.universeId).length, playing: 1, maxPlayers: 40 };
     case "list_servers":
       await wait(400);
       if (s in ERRORS) throw ERRORS[s];

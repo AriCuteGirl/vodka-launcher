@@ -278,6 +278,41 @@ async fn launch_game(
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct Regrouped {
+    /// How many games were sent to the server.
+    moved: usize,
+    playing: u32,
+    max_players: u32,
+}
+
+/// Moves every account this window is running in one game into the same quiet public server.
+/// Each of those games is restarted to get there, since a running game can't be redirected from outside.
+#[tauri::command]
+async fn regroup(state: State<'_, AppState>, universe_id: u64) -> Result<Regrouped> {
+    let manager = state.instances.clone();
+    let running = blocking(move || Ok(instances::list(&manager))).await?;
+    let group: Vec<_> = running.into_iter().filter(|i| i.game.universe_id == universe_id).collect();
+    let Some(first) = group.first() else {
+        return Err(AppError::Other("None of your accounts is in that game any more.".into()));
+    };
+    let place_id = first.game.place_id;
+    let servers = state.api.public_servers(place_id).await?;
+    let server = roblox_api::parse::server_for_group(&servers, group.len() as u32)
+        .ok_or_else(|| AppError::Other("Roblox listed no public server with room for that game right now.".into()))?;
+    let uri = mocktail::launch::join_uri(place_id, &server.id);
+    let mut moved = 0;
+    for inst in &group {
+        let manager = state.instances.clone();
+        let (id, uri) = (inst.id, uri.clone());
+        if blocking(move || instances::restart_into(&manager, id, uri)).await.is_ok() {
+            moved += 1;
+        }
+    }
+    Ok(Regrouped { moved, playing: server.playing, max_players: server.max_players })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ServerLists {
     public: Vec<roblox_api::Server>,
     private: Vec<roblox_api::PrivateServer>,
@@ -833,6 +868,7 @@ pub fn run() {
             join_friend,
             friend_location,
             list_servers,
+            regroup,
             list_instances,
             refresh_instance_games,
             game_standing,

@@ -541,6 +541,15 @@ pub fn public_servers(body: &str) -> Result<Vec<Server>> {
     Ok(servers)
 }
 
+/// The server to gather `needed` accounts in: the emptiest one that has room for all of them,
+/// or simply the emptiest if none does. `servers` must already be sorted emptiest first.
+pub fn server_for_group(servers: &[Server], needed: u32) -> Option<&Server> {
+    servers
+        .iter()
+        .find(|s| s.max_players == 0 || s.max_players.saturating_sub(s.playing) >= needed)
+        .or_else(|| servers.first())
+}
+
 /// Private servers that come with an access code (the ones this account may join).
 pub fn private_servers(body: &str) -> Result<Vec<PrivateServer>> {
     #[derive(Deserialize)]
@@ -1047,6 +1056,18 @@ mod tests {
         assert_eq!(servers.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["bbbb-2", "aaaa-1"]);
         assert_eq!((servers[0].playing, servers[0].max_players, servers[0].ping), (1, 40, Some(120)));
         assert!(public_servers(r#"{"data":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_group_goes_to_the_emptiest_server_with_room_for_everyone() {
+        let server = |id: &str, playing, max_players| Server { id: id.into(), playing, max_players, ping: None };
+        let list = [server("a", 38, 40), server("b", 39, 40), server("c", 30, 40)];
+        // Sorted emptiest-first by the caller; "a" has 2 free, "c" has 10.
+        assert_eq!(server_for_group(&list, 2).unwrap().id, "a");
+        assert_eq!(server_for_group(&list, 4).unwrap().id, "c");
+        // Nobody has room for 20: take the emptiest and let Roblox overflow the rest.
+        assert_eq!(server_for_group(&list, 20).unwrap().id, "a");
+        assert!(server_for_group(&[], 3).is_none());
     }
 
     #[test]
