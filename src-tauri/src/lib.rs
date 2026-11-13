@@ -516,6 +516,36 @@ async fn catalog_search(state: State<'_, AppState>, keyword: String, category: u
     Ok(ItemPage { items, next })
 }
 
+/// What buying an item would involve for the active account: price, balance, whether it's possible. Changes nothing.
+#[tauri::command]
+async fn item_offer(app: AppHandle, state: State<'_, AppState>, asset_id: u64) -> Result<roblox_api::Offer> {
+    let (account, cookie) = active_cookie(&app).await?;
+    state.api.offer(&cookie, account.id, asset_id).await
+}
+
+/// A random identifier Roblox uses to make sure a retried purchase isn't charged twice.
+fn purchase_key() -> Result<String> {
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut bytes))
+        .map_err(|e| AppError::Other(format!("Could not prepare the purchase: {e}")))?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32]))
+}
+
+/// Buys an item for the active account with its Robux, at exactly the price the user confirmed.
+/// Returns the offer afterwards (now owned, new balance).
+#[tauri::command]
+async fn buy_item(app: AppHandle, state: State<'_, AppState>, asset_id: u64, agreed_price: u64) -> Result<roblox_api::Offer> {
+    let (account, cookie) = active_cookie(&app).await?;
+    state.api.buy(&cookie, account.id, asset_id, agreed_price, &purchase_key()?).await?;
+    state.api.clear_cache();
+    state.api.offer(&cookie, account.id, asset_id).await
+}
+
 /// Profile pictures for any Roblox users (public data), keyed by user id.
 #[tauri::command]
 async fn headshots(state: State<'_, AppState>, user_ids: Vec<u64>) -> Result<std::collections::HashMap<u64, String>> {
@@ -802,6 +832,8 @@ pub fn run() {
             avatar_set_accessories,
             avatar_save_outfit,
             catalog_search,
+            item_offer,
+            buy_item,
             headshots,
             wear_outfit,
             stop_instance,
@@ -847,6 +879,15 @@ mod tests {
         // Its choice was removed elsewhere: fall back instead of acting as nobody.
         assert_eq!(pick_active(&saved, Some(9)).unwrap().id, 1);
         assert!(pick_active(&Settings::default(), Some(2)).is_none());
+    }
+
+    #[test]
+    fn purchase_keys_are_random_uuids() {
+        let (a, b) = (purchase_key().unwrap(), purchase_key().unwrap());
+        assert_ne!(a, b);
+        assert_eq!(a.len(), 36);
+        assert_eq!(a.as_bytes()[14], b'4');
+        assert!(a.bytes().all(|c| c == b'-' || c.is_ascii_hexdigit()));
     }
 
     #[test]

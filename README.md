@@ -17,7 +17,8 @@ A Roblox launcher for Linux. Vodka is the front end; [Mocktail](https://github.c
 - Searches all of Roblox and shows the public charts.
 - Shows your friends, what they're playing, and friend requests; joins a friend's server when Roblox shares it.
 - Has its own opt-in chat and parties (up to six) between Vodka users, with game invites.
-- Switches between your saved avatar outfits, edits what you wear, and browses the avatar catalog (read-only).
+- Switches between your saved avatar outfits, edits what you wear, and browses the avatar catalog.
+- Buys fixed-price catalog items with your Robux, only after you confirm the exact price in a dialog.
 - Sets frame rate, graphics and FFlags for all accounts or per account, and can hold or roll back the Roblox client.
 
 Running more than one Roblox client at once is not supported by Mocktail's developers and is against Roblox's Terms of Use. Vodka warns

@@ -5,8 +5,8 @@
   import Modal from "$lib/components/Modal.svelte";
   import Skeleton from "$lib/components/Skeleton.svelte";
   import StateCard from "$lib/components/StateCard.svelte";
-  import { toast } from "$lib/state.svelte";
-  import { toAppError, type Item, type Loadable } from "$lib/types";
+  import { app, signIn, toast } from "$lib/state.svelte";
+  import { toAppError, type Item, type Loadable, type Offer } from "$lib/types";
 
   const CATEGORIES = [
     { id: 11, label: "Accessories" },
@@ -69,8 +69,57 @@
     return () => clearTimeout(timer);
   });
 
+  // Buying: what the open item costs this account, and the two-step confirmation.
+  let offer = $state<Loadable<Offer> | null>(null);
+  let confirming = $state(false);
+  let buying = $state(false);
+  let justBought = $state(false);
+
+  async function show(item: Item) {
+    open = item;
+    confirming = false;
+    justBought = false;
+    offer = null;
+    if (item.kind === "Bundle" || !app.account) return;
+    offer = { status: "loading" };
+    try {
+      const data = await api.itemOffer(item.id);
+      if (open?.id === item.id) offer = { status: "ready", data };
+    } catch (e) {
+      if (open?.id === item.id) offer = { status: "error", error: toAppError(e) };
+    }
+  }
+
+  /** Spends Robux. Only reachable from the confirm step, with the price the user is looking at. */
+  async function buy(item: Item, price: number) {
+    if (buying) return;
+    buying = true;
+    try {
+      const after = await api.buyItem(item.id, price);
+      offer = { status: "ready", data: after };
+      justBought = true;
+      toast(`Bought ${item.name} for ${price.toLocaleString()} Robux.`, "ok");
+    } catch (e) {
+      toast(toAppError(e).message, "danger");
+      // The price or your balance may have changed: show the current state again.
+      void show(item);
+    }
+    confirming = false;
+    buying = false;
+  }
+
+  async function wearNow(item: Item) {
+    try {
+      const on = await api.avatarWearing();
+      const refused = await api.avatarSetItems([...on.map((i) => i.id), item.id]);
+      if (refused.length) toast("Roblox wouldn't put it on. It may be over a limit for its type; try Avatar → Advanced.", "danger");
+      else toast(`Wearing ${item.name}.`, "ok");
+    } catch (e) {
+      toast(toAppError(e).message, "danger");
+    }
+  }
+
   const link = (item: Item) => `https://www.roblox.com/${item.kind === "Bundle" ? "bundles" : "catalog"}/${item.id}`;
-  const price = (item: Item) => (item.price == null ? "Not for sale" : item.price === 0 ? "Free" : `${item.price.toLocaleString()} Robux`);
 
   async function copy(text: string, what: string) {
     try {
@@ -86,7 +135,7 @@
   <header>
     <div>
       <h1>Marketplace</h1>
-      <p class="muted">Browse Roblox's avatar catalog. Buying still happens on roblox.com; Vodka never spends Robux.</p>
+      <p class="muted">Browse and buy from Roblox's avatar catalog. Vodka asks before every purchase and shows the exact price.</p>
     </div>
     <div class="filters">
       <label class="search">
@@ -126,10 +175,10 @@
     <ul class="grid">
       {#each results.data as item (`${item.kind}:${item.id}`)}
         <li>
-          <button class="item" onclick={() => (open = item)} aria-label="Details for {item.name}">
+          <button class="item" onclick={() => show(item)} aria-label="Details for {item.name}">
             <span class="pic">{#if item.imageUrl}<img src={item.imageUrl} alt="" loading="lazy" />{:else}<Icon name="market" size={32} />{/if}</span>
             <span class="name">{item.name}</span>
-            <span class="price" class:free={item.price === 0}>{price(item)}</span>
+            {@render cost(item.price, false)}
           </button>
         </li>
       {/each}
@@ -138,25 +187,62 @@
   {/if}
 </div>
 
+{#snippet cost(amount: number | null, big: boolean)}
+  <span class="price" class:big class:free={amount === 0} class:none={amount == null}>
+    {#if amount == null}Not for sale{:else if amount === 0}Free{:else}<Icon name="robux" size={big ? 20 : 14} /><span>{amount.toLocaleString()}</span><span class="sr-only">Robux</span>{/if}
+  </span>
+{/snippet}
+
 {#if open}
   {@const item = open}
+  {@const o = offer?.status === "ready" ? offer.data : null}
   <Modal title={item.name} onclose={() => (open = null)}>
     <div class="detail">
-      <span class="big">{#if item.imageUrl}<img src={item.imageUrl} alt="" />{:else}<Icon name="market" size={56} />{/if}</span>
+      <span class="big-pic">{#if item.imageUrl}<img src={item.imageUrl} alt="" />{:else}<Icon name="market" size={56} />{/if}</span>
       <div class="facts">
-        <p class="price" class:free={item.price === 0}>{price(item)}</p>
-        {#if item.creator}<p class="muted">By {item.creator}</p>{/if}
+        {@render cost(o?.price ?? item.price, true)}
+        {#if item.creator}<p class="muted">By <b>{item.creator}</b></p>{/if}
         <p class="faint">{item.kind === "Bundle" ? "Bundle" : "Item"} ID <code class="selectable">{item.id}</code></p>
-        {#if item.description}<p class="desc selectable">{item.description}</p>{/if}
+        {#if o?.owned}<p class="owned"><Icon name="check" size={16} />{justBought ? "It's yours now" : "You own this"}</p>{/if}
+        {#if o?.balance != null}<p class="balance faint">Your balance: <Icon name="robux" size={13} />{o.balance.toLocaleString()}</p>{/if}
       </div>
     </div>
-    {#if item.kind !== "Bundle"}
-      <p class="faint tip">Own it? Paste the ID into Avatar → Advanced to wear it with up to ten accessories.</p>
+    {#if item.description}<p class="desc selectable">{item.description}</p>{/if}
+
+    {#if confirming && o?.price != null}
+      <div class="confirm" role="alertdialog" aria-label="Confirm purchase">
+        <p><b>Buy {item.name} for <Icon name="robux" size={14} />{o.price.toLocaleString()} Robux?</b></p>
+        <p class="muted">
+          This spends real Robux from {app.account?.displayName ?? "this account"} and can't be undone here.
+          {#if o.balance != null}You'll have <Icon name="robux" size={13} />{(o.balance - o.price).toLocaleString()} left.{/if}
+        </p>
+        <div class="row">
+          <Button onclick={() => (confirming = false)} disabled={buying}>Cancel</Button>
+          <Button variant="primary" busy={buying} onclick={() => buy(item, o.price!)}>Yes, buy it</Button>
+        </div>
+      </div>
+    {:else if item.kind === "Bundle"}
+      <p class="faint tip">Bundles can't be bought in Vodka yet. Copy the link and buy it on roblox.com.</p>
+    {:else if !app.account}
+      <p class="faint tip">Sign in to see your balance and buy items.</p>
+    {:else if offer?.status === "loading"}
+      <Skeleton height="38px" />
+    {:else if offer?.status === "error"}
+      <p class="err" role="alert">Couldn't check this item: {offer.error.message}</p>
+    {:else if o && !o.buyable && !o.owned}
+      <p class="faint tip">{o.whyNot}</p>
     {/if}
+
     {#snippet actions()}
       <Button icon="copy" onclick={() => copy(String(item.id), "ID")}>Copy ID</Button>
       <Button icon="copy" onclick={() => copy(link(item), "Link")}>Copy link</Button>
-      <Button variant="primary" onclick={() => (open = null)}>Done</Button>
+      {#if !app.account && item.kind !== "Bundle"}
+        <Button variant="primary" busy={app.signingIn} onclick={signIn}>Sign in</Button>
+      {:else if o?.owned}
+        <Button variant="primary" icon="avatar" onclick={() => wearNow(item)}>Wear now</Button>
+      {:else if o?.buyable && o.price != null && !confirming}
+        <Button variant="primary" onclick={() => (confirming = true)}>{o.price === 0 ? "Get for free" : "Buy"}</Button>
+      {/if}
     {/snippet}
   </Modal>
 {/if}
@@ -263,7 +349,7 @@
     animation: rise var(--slow) var(--ease) backwards;
   }
   .pic,
-  .big {
+  .big-pic {
     display: grid;
     place-items: center;
     aspect-ratio: 1;
@@ -281,7 +367,7 @@
       box-shadow var(--slow) var(--ease);
   }
   .pic img,
-  .big img {
+  .big-pic img {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -300,12 +386,25 @@
     text-overflow: ellipsis;
   }
   .price {
-    font-size: var(--fs-xs);
-    color: var(--text-1);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--fs-sm);
+    font-weight: 650;
+    color: var(--frost);
     font-variant-numeric: tabular-nums;
+  }
+  .price.none {
+    font-weight: 500;
+    color: var(--text-2);
   }
   .price.free {
     color: var(--ok);
+  }
+  .price.big {
+    gap: 6px;
+    font-size: var(--fs-xl);
+    line-height: 1.1;
   }
   .more {
     display: grid;
@@ -323,20 +422,63 @@
     font-size: var(--fs-sm);
     min-width: 0;
   }
-  .facts .price {
-    font-size: var(--fs-lg);
-    font-weight: 650;
+  .facts b {
     color: var(--text-0);
   }
-  .facts .price.free {
+  .owned {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    padding: 3px 10px;
+    border-radius: var(--r-full);
+    background: rgba(116, 230, 180, 0.12);
     color: var(--ok);
+    font-weight: 600;
+  }
+  .balance {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }
   .desc {
-    max-height: 130px;
+    max-height: 110px;
+    margin-top: var(--s-3);
+    padding: var(--s-3);
     overflow-y: auto;
+    border-radius: var(--r-md);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--line);
     color: var(--text-1);
+    font-size: var(--fs-sm);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+  .confirm {
+    display: grid;
+    gap: var(--s-2);
+    margin-top: var(--s-3);
+    padding: var(--s-4);
+    border-radius: var(--r-md);
+    border: 1px solid rgba(255, 213, 133, 0.45);
+    background: rgba(255, 213, 133, 0.08);
+    font-size: var(--fs-sm);
+  }
+  .confirm p :global(svg) {
+    display: inline-block;
+    vertical-align: -2px;
+    margin-right: 2px;
+  }
+  .row {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--s-2);
+    margin-top: var(--s-2);
+  }
+  .err {
+    margin-top: var(--s-3);
+    color: var(--danger);
+    font-size: var(--fs-sm);
   }
   .tip {
     margin-top: var(--s-3);

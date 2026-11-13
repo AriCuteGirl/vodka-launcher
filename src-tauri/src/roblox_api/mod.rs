@@ -3,7 +3,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Chart, Game, GameStanding, Item, Outfit, Person, Presence, PrivateServer, Server, User};
+pub use parse::{Chart, Game, GameStanding, Item, Offer, Outfit, Person, Presence, PrivateServer, Server, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -322,6 +322,38 @@ impl Client {
         }
         let (items, next) = parse::catalog(&self.get(url.as_str(), None, CHARTS_TTL).await?)?;
         Ok((self.with_pictures(items).await, next))
+    }
+
+    /// The account's Robux balance.
+    pub async fn robux(&self, cookie: &str, user_id: u64) -> Result<u64> {
+        let body = self.send(&format!("https://economy.roblox.com/v1/users/{user_id}/currency"), None, Some(cookie)).await?;
+        serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("robux")?.as_u64())
+            .ok_or_else(|| AppError::Api("balance".into()))
+    }
+
+    async fn sale_details(&self, asset_id: u64) -> Result<String> {
+        // Never cached: the price shown and the price paid must be the current one.
+        self.send(&format!("https://economy.roblox.com/v2/assets/{asset_id}/details"), None, None).await
+    }
+
+    /// What buying this item would involve for this account. Changes nothing.
+    pub async fn offer(&self, cookie: &str, user_id: u64, asset_id: u64) -> Result<Offer> {
+        let details = self.sale_details(asset_id).await?;
+        let owned_url = format!("https://inventory.roblox.com/v1/users/{user_id}/items/Asset/{asset_id}/is-owned");
+        let owned = self.send(&owned_url, None, Some(cookie)).await.is_ok_and(|b| b.trim() == "true");
+        let balance = self.robux(cookie, user_id).await.ok();
+        parse::offer(&details, owned, balance)
+    }
+
+    /// Buys an item for exactly `agreed_price` Robux. Spends the account's Robux.
+    /// Only ever called after the user confirmed that item and that price in a dialog.
+    pub async fn buy(&self, cookie: &str, user_id: u64, asset_id: u64, agreed_price: u64, idempotency_key: &str) -> Result<()> {
+        let details = self.sale_details(asset_id).await?;
+        let (url, body) = parse::purchase_request(&details, agreed_price, user_id, idempotency_key)?;
+        let answer = self.send(&url, Some(&body), Some(cookie)).await?;
+        parse::purchase_outcome(&answer)
     }
 
     /// Whether this account favorited and how it rated a game, plus the game's public vote counts.

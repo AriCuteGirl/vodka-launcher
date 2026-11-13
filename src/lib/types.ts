@@ -130,6 +130,18 @@ export interface ItemPage {
   next: string | null;
 }
 
+/** What buying an item would involve, before the user confirms. */
+export interface Offer {
+  assetId: number;
+  name: string;
+  price: number | null;
+  /** Vodka can buy it: on sale at a fixed price, enough Robux, not owned, not a limited. */
+  buyable: boolean;
+  whyNot: string | null;
+  owned: boolean;
+  balance: number | null;
+}
+
 export interface GameStanding {
   favorited: boolean;
   /** true liked, false disliked, null not rated. */

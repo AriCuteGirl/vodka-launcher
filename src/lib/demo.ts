@@ -113,6 +113,14 @@ const item = (id: number, name: string, kind: string, price: number | null = nul
 });
 let demoWorn: Item[] = [item(11, "Snow Cap", "Hat"), item(12, "Ice Shades", "FaceAccessory"), item(13, "Black Hoodie", "Shirt"), item(14, "Jeans", "Pants"), item(15, "Torso", "Torso")];
 const demoOwned: Item[] = [item(11, "Snow Cap", "Hat"), item(12, "Ice Shades", "FaceAccessory"), item(21, "Cat Ears", "HairAccessory"), item(22, "Frost Scarf", "NeckAccessory"), item(23, "Wings", "BackAccessory")];
+let demoRobux = 240;
+const demoBought = new Set<number>();
+const demoOffer = (id: number) => {
+  const price = 40 + (id - 100) * 15;
+  const owned = demoBought.has(id);
+  const whyNot = owned ? "You already own this." : demoRobux < price ? "You don't have enough Robux for this." : null;
+  return { assetId: id, name: "Item", price, buyable: !whyNot, whyNot, owned, balance: demoRobux };
+};
 const demoStanding: Record<string, GameStanding> = {};
 const standing = (id: unknown) => (demoStanding[String(id)] ??= { favorited: false, vote: null, canVote: Number(id) % 2 === 0, whyNot: Number(id) % 2 === 0 ? null : "Play this game first, then you can rate it.", upVotes: 10984750, downVotes: 746771 });
 let demoParty: Party | null = null;
@@ -391,6 +399,17 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return [];
     case "headshots":
       return {};
+    case "item_offer":
+      await wait(350);
+      return demoOffer(args.assetId as number);
+    case "buy_item": {
+      await wait(700);
+      const offer = demoOffer(args.assetId as number);
+      if (!offer.buyable) throw { kind: "other", message: offer.whyNot };
+      demoRobux -= offer.price;
+      demoBought.add(args.assetId as number);
+      return demoOffer(args.assetId as number);
+    }
     case "avatar_wearing":
       await wait(250);
       return demoWorn;

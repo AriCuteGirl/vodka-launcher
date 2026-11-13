@@ -5,7 +5,10 @@
 Phase 4 (in progress): social.
 
 - Up to 10 games at once instead of 2: games beyond the second run from their own copy of Mocktail's binary. A five-second reminder shows each time another game is added.
-- Marketplace: search and filter the avatar catalog, with prices, details, and copy ID or link. Read-only; Vodka never buys.
+- Marketplace: search and filter the avatar catalog, with prices, details, and copy ID or link.
+- Buying from the Marketplace: fixed-price items only, behind a confirmation that shows the price and your balance. The purchase is refused if the price changed since you looked.
+- Fixed: Settings showed "500 Internal Error" because the Performance form reloaded itself in a loop.
+- The avatar picture and new outfit pictures refresh by themselves.
 - Avatar editor: see what you are wearing, take items off, wear items you own, save the look as an outfit, and an Advanced box for up to ten accessories by item ID.
 - Favorite, Like and Dislike buttons in each game's dialog.
 - The party follows its leader into games automatically; members can turn following off.

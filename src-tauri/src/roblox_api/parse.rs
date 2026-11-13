@@ -289,6 +289,104 @@ pub fn outfit_body(name: &str, avatar: &serde_json::Value) -> serde_json::Value 
     })
 }
 
+/// What buying an item would involve, as shown to the user before they confirm.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Offer {
+    pub asset_id: u64,
+    pub name: String,
+    /// Robux. `None` when the item has no fixed price.
+    pub price: Option<u64>,
+    /// Vodka can buy it: on sale at a fixed price, not a limited or resale item.
+    pub buyable: bool,
+    /// Why not, in plain words, when it can't be bought here.
+    pub why_not: Option<String>,
+    pub owned: bool,
+    pub balance: Option<u64>,
+}
+
+/// Reads an item's sale details and decides whether Vodka can buy it.
+pub fn offer(details: &str, owned: bool, balance: Option<u64>) -> Result<Offer> {
+    let d: serde_json::Value = serde_json::from_str(details).map_err(|e| bad("item", e))?;
+    let asset_id = d.get("AssetId").and_then(|v| v.as_u64()).ok_or_else(|| bad("item", "no id"))?;
+    let price = d.get("PriceInRobux").and_then(|v| v.as_u64());
+    let flag = |k: &str| d.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    let why_not = if owned {
+        Some("You already own this.".to_owned())
+    } else if !flag("IsForSale") || price.is_none() {
+        Some("This item isn't on sale right now.".to_owned())
+    } else if flag("IsLimited") || flag("IsLimitedUnique") {
+        Some("Limited items are sold by other players at changing prices. Buy those on roblox.com.".to_owned())
+    } else if balance.is_some_and(|b| b < price.unwrap_or(0)) {
+        Some("You don't have enough Robux for this.".to_owned())
+    } else {
+        None
+    };
+    Ok(Offer {
+        asset_id,
+        name: d.get("Name").and_then(|v| v.as_str()).unwrap_or("Item").to_owned(),
+        price,
+        buyable: why_not.is_none(),
+        why_not,
+        owned,
+        balance,
+    })
+}
+
+/// The purchase request for an item: (url, body). Refuses if the price is no longer the one the user agreed to.
+pub fn purchase_request(details: &str, agreed_price: u64, buyer_id: u64, idempotency_key: &str) -> Result<(String, serde_json::Value)> {
+    let o = offer(details, false, None)?;
+    if !o.buyable {
+        return Err(AppError::Other(o.why_not.unwrap_or_else(|| "This item can't be bought here.".into())));
+    }
+    if o.price != Some(agreed_price) {
+        return Err(AppError::Other(format!(
+            "The price changed to {} Robux since you looked. Nothing was bought; open the item again to see the new price.",
+            o.price.unwrap_or(0)
+        )));
+    }
+    let d: serde_json::Value = serde_json::from_str(details).map_err(|e| bad("item", e))?;
+    let creator = d.get("Creator");
+    let seller_id = creator.and_then(|c| c.get("CreatorTargetId")).and_then(|v| v.as_u64()).ok_or_else(|| bad("item", "no seller"))?;
+    let seller_type = creator.and_then(|c| c.get("CreatorType")).and_then(|v| v.as_str()).unwrap_or("User");
+    let text = |k: &str| d.get(k).and_then(|v| v.as_str()).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
+    // Newer items are sold through the "collectibles" system even at a fixed price; older ones through products.
+    if let (Some(item), Some(product)) = (text("CollectibleItemId"), text("CollectibleProductId")) {
+        return Ok((
+            format!("https://apis.roblox.com/marketplace-sales/v1/item/{item}/purchase-item"),
+            serde_json::json!({
+                "collectibleItemId": item,
+                "collectibleProductId": product,
+                "expectedCurrency": 1,
+                "expectedPrice": agreed_price,
+                "expectedPurchaserId": buyer_id.to_string(),
+                "expectedPurchaserType": "User",
+                "expectedSellerId": seller_id.to_string(),
+                "expectedSellerType": seller_type,
+                "idempotencyKey": idempotency_key,
+            }),
+        ));
+    }
+    let product_id = d.get("ProductId").and_then(|v| v.as_u64()).filter(|id| *id > 0).ok_or_else(|| bad("item", "no product"))?;
+    Ok((
+        format!("https://economy.roblox.com/v1/purchases/products/{product_id}"),
+        serde_json::json!({ "expectedCurrency": 1, "expectedPrice": agreed_price, "expectedSellerId": seller_id }),
+    ))
+}
+
+/// Whether Roblox says the purchase went through; its own explanation otherwise.
+pub fn purchase_outcome(body: &str) -> Result<()> {
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| bad("purchase", e))?;
+    if v.get("purchased").and_then(|p| p.as_bool()) == Some(true) {
+        return Ok(());
+    }
+    let reason = ["errorMessage", "errorMsg", "purchaseResult", "reason"]
+        .iter()
+        .find_map(|k| v.get(*k).and_then(|x| x.as_str()).filter(|s| !s.is_empty()))
+        .unwrap_or("Roblox didn't say why.");
+    Err(AppError::Other(format!("Roblox didn't complete the purchase: {reason}")))
+}
+
 /// How the signed-in account stands with a game.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -842,6 +940,53 @@ mod tests {
         assert_eq!(next, None);
         assert_eq!((found[0].price, found[0].creator.as_deref(), found[0].description.as_deref()), (Some(40), Some("UGC"), Some("meow")));
         assert_eq!((found[1].name.as_str(), found[1].kind.as_str(), found[1].price), ("Item", "Bundle", None));
+    }
+
+    const CLASSIC: &str = r#"{"AssetId":50,"ProductId":900,"Name":"Cap","PriceInRobux":15,"IsForSale":true,"IsLimited":false,"IsLimitedUnique":false,
+        "CollectibleItemId":null,"CollectibleProductId":null,"Creator":{"Id":1,"Name":"Maker","CreatorType":"Group","CreatorTargetId":77}}"#;
+    const COLLECTIBLE: &str = r#"{"AssetId":51,"ProductId":0,"Name":"Ears","PriceInRobux":40,"IsForSale":true,"IsLimited":false,"IsLimitedUnique":false,
+        "CollectibleItemId":"aaaa-1111","CollectibleProductId":"bbbb-2222","Creator":{"CreatorType":"User","CreatorTargetId":88}}"#;
+
+    #[test]
+    fn an_offer_says_whether_and_why_not() {
+        let ok = offer(CLASSIC, false, Some(100)).unwrap();
+        assert!(ok.buyable && ok.why_not.is_none());
+        assert_eq!((ok.price, ok.balance), (Some(15), Some(100)));
+        assert!(offer(CLASSIC, true, Some(100)).unwrap().why_not.unwrap().contains("already own"));
+        assert!(offer(CLASSIC, false, Some(14)).unwrap().why_not.unwrap().contains("enough Robux"));
+        let off_sale = CLASSIC.replace(r#""IsForSale":true"#, r#""IsForSale":false"#);
+        assert!(!offer(&off_sale, false, Some(100)).unwrap().buyable);
+        let limited = CLASSIC.replace(r#""IsLimited":false"#, r#""IsLimited":true"#);
+        assert!(offer(&limited, false, Some(100)).unwrap().why_not.unwrap().contains("roblox.com"));
+    }
+
+    #[test]
+    fn a_purchase_states_the_exact_price_and_seller() {
+        let (url, body) = purchase_request(CLASSIC, 15, 5, "key").unwrap();
+        assert_eq!(url, "https://economy.roblox.com/v1/purchases/products/900");
+        assert_eq!(body, serde_json::json!({"expectedCurrency":1,"expectedPrice":15,"expectedSellerId":77}));
+        let (url, body) = purchase_request(COLLECTIBLE, 40, 5, "key").unwrap();
+        assert_eq!(url, "https://apis.roblox.com/marketplace-sales/v1/item/aaaa-1111/purchase-item");
+        assert_eq!((body["expectedPrice"].as_u64(), body["expectedPurchaserId"].as_str(), body["expectedSellerId"].as_str()), (Some(40), Some("5"), Some("88")));
+        assert_eq!((body["collectibleProductId"].as_str(), body["idempotencyKey"].as_str()), (Some("bbbb-2222"), Some("key")));
+    }
+
+    #[test]
+    fn nothing_is_bought_if_the_price_moved_or_the_item_is_not_plainly_for_sale() {
+        let err = purchase_request(CLASSIC, 10, 5, "key").unwrap_err();
+        assert!(err.to_string().contains("price changed to 15"));
+        let limited = CLASSIC.replace(r#""IsLimited":false"#, r#""IsLimited":true"#);
+        assert!(purchase_request(&limited, 15, 5, "key").is_err());
+        let off_sale = COLLECTIBLE.replace(r#""IsForSale":true"#, r#""IsForSale":false"#);
+        assert!(purchase_request(&off_sale, 40, 5, "key").is_err());
+    }
+
+    #[test]
+    fn purchase_results_are_read_honestly() {
+        assert!(purchase_outcome(r#"{"purchased":true,"reason":"Success"}"#).is_ok());
+        assert!(purchase_outcome(r#"{"purchased":false,"reason":"InsufficientFunds","errorMsg":"You need more Robux."}"#).unwrap_err().to_string().contains("You need more Robux."));
+        assert!(purchase_outcome(r#"{"purchaseResult":"Flooded","purchased":false}"#).unwrap_err().to_string().contains("Flooded"));
+        assert!(purchase_outcome("{}").unwrap_err().to_string().contains("didn't say why"));
     }
 
     #[test]
