@@ -107,7 +107,12 @@ export async function syncChat() {
     chat.contacts = data.contacts;
     const missing = data.contacts.map((c) => c.robloxId).filter((id) => !(String(id) in chat.pictures));
     if (missing.length) {
-      void api.headshots(missing).then((found) => (chat.pictures = { ...chat.pictures, ...found })).catch(() => {});
+      void api
+        .headshots(missing)
+        .then((found) => {
+          chat.pictures = { ...chat.pictures, ...found };
+        })
+        .catch(() => {});
     }
     if (data.messages.length) {
       const known = new Set(chat.messages.map((m) => m.id));

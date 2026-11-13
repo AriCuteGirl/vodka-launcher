@@ -24,25 +24,43 @@
 
   /** After the editor changed the look: redraw the picture once Roblox has, and refresh outfits. */
   function changed() {
-    for (const delay of [2500, 6000]) {
-      setTimeout(async () => {
-        try {
-          picture = (await api.avatarPicture()) ?? picture;
-        } catch {
-          // The old picture stays; Refresh is there.
-        }
-      }, delay);
-    }
+    void watchPicture();
+    pictureRetries = 0;
+    // A saved outfit should show up on the Outfits tab without a manual refresh.
+    void load(true);
   }
 
-  async function load() {
-    view = { status: "loading" };
+  async function load(quiet = false) {
+    if (!quiet) view = { status: "loading" };
     try {
       const data = await api.avatar();
-      picture = data.pictureUrl;
+      picture = data.pictureUrl ?? picture;
       view = { status: "ready", data };
+      // Roblox needs a few seconds to draw a new outfit's picture: look again until they're all there.
+      if (data.outfits.some((o) => !o.imageUrl) && pictureRetries++ < 5) setTimeout(() => void load(true), 4000);
     } catch (e) {
-      view = { status: "error", error: toAppError(e) };
+      if (!quiet) view = { status: "error", error: toAppError(e) };
+    }
+  }
+  let pictureRetries = 0;
+
+  let watching = 0;
+  /** After the look changed: keep asking until Roblox has drawn the new picture, so nobody has to press Refresh. */
+  async function watchPicture() {
+    const run = ++watching;
+    const before = picture;
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, i === 0 ? 1500 : 2000));
+      if (run !== watching) return;
+      try {
+        const now = await api.avatarPicture();
+        if (now && now !== before) {
+          picture = now;
+          return;
+        }
+      } catch {
+        // Try again on the next round.
+      }
     }
   }
 
@@ -50,6 +68,7 @@
   $effect(() => {
     void app.account?.id;
     lastWorn = null;
+    pictureRetries = 0;
     if (app.account) void load();
   });
 
@@ -62,16 +81,7 @@
       const inGame = myInstance() ? " In your running game it shows after you respawn or rejoin." : "";
       if (refused.length) toast(`Wearing ${outfit.name}, but Roblox refused: ${refused.join(", ")}.${inGame}`, "danger");
       else toast(`Wearing ${outfit.name}.${inGame}`, "ok");
-      // Roblox redraws the picture a moment after the change.
-      for (const delay of [2500, 6000]) {
-        setTimeout(async () => {
-          try {
-            picture = (await api.avatarPicture()) ?? picture;
-          } catch {
-            // The old picture stays; Refresh is there.
-          }
-        }, delay);
-      }
+      void watchPicture();
     } catch (e) {
       toast(toAppError(e).message, "danger");
     }
@@ -98,6 +108,7 @@
     <div class="layout">
       <section class="now glass">
         <h2>{app.account.displayName} right now</h2>
+        <p class="faint note">Updates by itself a few seconds after you change something.</p>
         <div class="frame">
           {#if picture}<img src={picture} alt="Current avatar of {app.account.displayName}" />
           {:else if view.status === "loading"}<Skeleton height="100%" radius="var(--r-lg)" />
@@ -111,7 +122,7 @@
             } catch (e) {
               toast(toAppError(e).message, "danger");
             }
-          }}>Refresh picture</Button
+          }}>Refresh now</Button
         >
         {#if myInstance()}
           <p class="faint note">You're in a game. A new outfit shows there after you respawn or rejoin; some games never reload it.</p>
@@ -145,7 +156,7 @@
           {#if view.error.kind === "rate_limited"}
             <StateCard icon="clock" tone="warn" title="Roblox asked us to slow down">
               Wait a minute, then retry.
-              {#snippet actions()}<Button icon="refresh" onclick={load}>Retry</Button>{/snippet}
+              {#snippet actions()}<Button icon="refresh" onclick={() => load()}>Retry</Button>{/snippet}
             </StateCard>
           {:else if view.error.kind === "session_expired"}
             <StateCard icon="lock" tone="warn" title="Your Roblox session ended">
@@ -155,7 +166,7 @@
           {:else}
             <StateCard icon={view.error.kind === "offline" ? "wifiOff" : "alert"} tone="danger" title="Couldn't load your outfits">
               {view.error.message}
-              {#snippet actions()}<Button icon="refresh" onclick={load}>Retry</Button>{/snippet}
+              {#snippet actions()}<Button icon="refresh" onclick={() => load()}>Retry</Button>{/snippet}
             </StateCard>
           {/if}
         {:else if view.data.outfits.length === 0}

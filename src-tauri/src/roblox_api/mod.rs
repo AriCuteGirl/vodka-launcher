@@ -362,8 +362,9 @@ impl Client {
                 "https://thumbnails.roblox.com/v1/users/outfits?userOutfitIds={}&size=150x150&format=Png&isCircular=false",
                 join_ids(batch)
             );
-            // Pictures are extras; the list is still usable by name.
-            if let Ok(body) = self.get(&url, None, THUMB_TTL).await {
+            // Pictures are extras; the list is still usable by name. Not cached: a new outfit's
+            // picture takes Roblox a few seconds to draw, and a cached "not ready" would hide it for minutes.
+            if let Ok(body) = self.send(&url, None, None).await {
                 pictures.extend(parse::thumbnails(&body).unwrap_or_default());
             }
         }

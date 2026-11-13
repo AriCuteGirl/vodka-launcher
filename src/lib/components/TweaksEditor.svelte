@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { api } from "$lib/api";
   import { applyPreset, parseFlagJson, PRESETS } from "$lib/presets";
   import { app, rollbackClient, saveLaunchOptions, toast } from "$lib/state.svelte";
@@ -34,21 +35,27 @@
   function load(s: number | null) {
     scope = s;
     const from = saved(s);
-    draft = { ...NO_OPTIONS, ...from, fflags: { ...from.fflags } };
-    dirty = false;
+    const next: LaunchOptions = { ...NO_OPTIONS, ...from, fflags: { ...from.fflags } };
+    let changed = false;
     // A limit saved by an older Vodka may be lower than today's minimum: show the raised value and offer to save it.
-    const mb = draft.memoryLimitMb;
+    const mb = next.memoryLimitMb;
     if (mb != null && mb !== 0 && !MEMORY_PRESETS.includes(mb)) {
-      draft.memoryLimitMb = MEMORY_PRESETS.find((p) => p >= mb) ?? MEMORY_PRESETS[MEMORY_PRESETS.length - 1];
-      dirty = true;
+      next.memoryLimitMb = MEMORY_PRESETS.find((p) => p >= mb) ?? MEMORY_PRESETS[MEMORY_PRESETS.length - 1];
+      changed = true;
     }
+    draft = next;
+    dirty = changed;
     error = null;
     flagError = null;
   }
   // Reload when saved settings change underneath (for example after a rollback).
   $effect(() => {
     void app.settings;
-    if (!dirty) load(scope);
+    // Only saved settings changing should reload the form. Without `untrack`, the form's own
+    // state would count as a trigger and the reload would re-run itself forever.
+    untrack(() => {
+      if (!dirty) load(scope);
+    });
   });
 
   function set<K extends keyof LaunchOptions>(key: K, value: LaunchOptions[K]) {
