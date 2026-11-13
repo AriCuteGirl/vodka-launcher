@@ -327,6 +327,10 @@ pub async fn launch(
         );
         let _ = app.emit("instances://changed", ());
         if restarting {
+            // Let go of this game's slot and account before starting it again. The finished game's
+            // record is still in scope here, and while it held them the new launch was refused
+            // as "already in a game".
+            drop(inst._claim);
             let uri = if rejoining {
                 // Give a crashed client a moment to let go of its files and its slot.
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;

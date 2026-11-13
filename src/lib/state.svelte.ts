@@ -278,7 +278,7 @@ export async function launchMany(game: Game, accountIds: number[], target: Targe
       }
       await refreshInstances();
       // Give each game a moment to claim its slot and profile before the next one starts.
-      if (id !== ids[ids.length - 1]) await pause(1500);
+      if (id !== ids[ids.length - 1]) await pause(2500);
     }
     if (started > 1) toast(`Started ${game.name} for ${started} accounts.`, "ok");
   };

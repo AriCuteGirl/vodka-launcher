@@ -307,6 +307,9 @@ async fn regroup(state: State<'_, AppState>, universe_id: u64) -> Result<Regroup
         if blocking(move || instances::restart_into(&manager, id, uri)).await.is_ok() {
             moved += 1;
         }
+        // One at a time: signing several accounts in at the same instant makes Roblox's
+        // sign-in service refuse some of them.
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
     }
     Ok(Regrouped { moved, playing: server.playing, max_players: server.max_players })
 }
