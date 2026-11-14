@@ -16,6 +16,8 @@ pub struct InstallStep {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MocktailStatus {
+    /// What runs the game here: "mocktail" on Linux, "roblox" (the official client) on Windows.
+    pub engine: &'static str,
     pub flatpak_available: bool,
     pub installed: bool,
     pub version: Option<String>,
@@ -102,16 +104,19 @@ pub fn install_steps(family: &str, flatpak_available: bool) -> Vec<InstallStep> 
     steps
 }
 
+#[cfg(not(windows))]
 fn run(args: &[&str]) -> Option<String> {
     let out = Command::new("flatpak").args(args).env("LC_ALL", "C").output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+#[cfg(not(windows))]
 fn flatpak_data_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     Some(PathBuf::from(home).join(".var/app").join(APP_ID).join("data/mocktail"))
 }
 
+#[cfg(not(windows))]
 pub fn detect() -> MocktailStatus {
     let os = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
     let (distro, family) = parse_os_release(&os);
@@ -125,6 +130,7 @@ pub fn detect() -> MocktailStatus {
         .and_then(|d| std::fs::read_to_string(d.join("current.json")).ok())
         .and_then(|t| parse_roblox_version(&t));
     MocktailStatus {
+        engine: "mocktail",
         flatpak_available,
         installed,
         version: listed.flatten(),
@@ -132,6 +138,45 @@ pub fn detect() -> MocktailStatus {
         running,
         distro,
         install_steps: if installed { vec![] } else { install_steps(family, flatpak_available) },
+    }
+}
+
+/// On Windows the "engine" is the official Roblox client: look for it where Roblox installs itself.
+#[cfg(windows)]
+pub fn detect() -> MocktailStatus {
+    use std::os::windows::process::CommandExt;
+    let versions = std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Roblox").join("Versions"));
+    let folders: Vec<(String, bool, u64)> = versions
+        .as_ref()
+        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| {
+            let modified = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs());
+            (e.file_name().to_string_lossy().into_owned(), e.path().join("RobloxPlayerBeta.exe").is_file(), modified.unwrap_or(0))
+        })
+        .collect();
+    let newest = crate::windows_player::newest_player(&folders).map(str::to_owned);
+    let running = Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/NH"])
+        .creation_flags(0x0800_0000)
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("RobloxPlayerBeta.exe"));
+    let installed = newest.is_some();
+    MocktailStatus {
+        engine: "roblox",
+        flatpak_available: true,
+        installed,
+        version: installed.then(|| "Official client".to_owned()),
+        roblox_version: newest,
+        running,
+        distro: "Windows".into(),
+        install_steps: if installed {
+            vec![]
+        } else {
+            vec![InstallStep { label: "Install Roblox, then start any game once from the website".into(), command: "https://www.roblox.com/download".into() }]
+        },
     }
 }
 

@@ -174,6 +174,8 @@ export interface InstallStep {
 }
 
 export interface MocktailStatus {
+  /** What runs the game: Mocktail on Linux, the official Roblox client on Windows. */
+  engine: "mocktail" | "roblox";
   flatpakAvailable: boolean;
   installed: boolean;
   version: string | null;

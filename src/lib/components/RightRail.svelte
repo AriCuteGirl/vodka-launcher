@@ -1,6 +1,6 @@
 <script lang="ts">
   import { elapsed, memory } from "$lib/format";
-  import { app, joinFriend, refreshMocktail, stopInstance } from "$lib/state.svelte";
+  import { app, joinFriend, onWindows, refreshMocktail, stopInstance } from "$lib/state.svelte";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import Skeleton from "./Skeleton.svelte";
@@ -64,12 +64,12 @@
         <span class="time"><Icon name="clock" size={14} />{elapsed((now - inst.startedAtMs) / 1000)}</span>
       </header>
       <p class="game">{inst.game.name}</p>
-      <p class="who faint">{inst.accountName} · {inst.fps != null ? `${Math.round(inst.fps)} FPS · ` : ""}{Math.round(inst.cpuPercent)}% CPU · {memory(inst.memoryBytes)}</p>
+      <p class="who faint">{inst.accountName}{#if !onWindows()} · {inst.fps != null ? `${Math.round(inst.fps)} FPS · ` : ""}{Math.round(inst.cpuPercent)}% CPU · {memory(inst.memoryBytes)}{/if}</p>
       {#if inst.phase === "starting"}
         <pre class="selectable" aria-label="Mocktail output">{inst.log.slice(-12).join("\n") || "Waiting for Mocktail…"}</pre>
       {/if}
       <div class="row">
-        <button class="mini" onclick={() => stopInstance(inst.id, true)}><Icon name="refresh" size={14} />Restart</button>
+        {#if !onWindows()}<button class="mini" onclick={() => stopInstance(inst.id, true)}><Icon name="refresh" size={14} />Restart</button>{/if}
         <button class="mini danger" onclick={() => stopInstance(inst.id)}><Icon name="close" size={14} />Close</button>
       </div>
     </section>
@@ -77,22 +77,22 @@
 
   <section class="glass">
     <header>
-      <h2>Mocktail</h2>
-      <button class="icon" onclick={recheck} aria-label="Check Mocktail again" class:spin={checking}><Icon name="refresh" size={16} /></button>
+      <h2>{onWindows() ? "Roblox" : "Mocktail"}</h2>
+      <button class="icon" onclick={recheck} aria-label="Check again" class:spin={checking}><Icon name="refresh" size={16} /></button>
     </header>
     {#if !m}
-      <p class="faint">Looking for Mocktail…</p>
+      <p class="faint">Looking for {onWindows() ? "Roblox" : "Mocktail"}…</p>
     {:else if m.installed}
       <p class="status ok"><i></i>{m.running ? "Running" : "Ready"}</p>
       <dl>
-        <dt>Mocktail</dt>
-        <dd>{m.version ?? "unknown"} · Flatpak</dd>
+        <dt>{onWindows() ? "Runs with" : "Mocktail"}</dt>
+        <dd>{m.version ?? "unknown"}{onWindows() ? "" : " · Flatpak"}</dd>
         <dt>Roblox client</dt>
         <dd>{m.robloxVersion ?? "downloads on first launch"}</dd>
       </dl>
     {:else}
       <p class="status bad"><i></i>Not installed</p>
-      <p class="faint small">Vodka needs Mocktail to run Roblox. Setup steps are on Home.</p>
+      <p class="faint small">Vodka needs {onWindows() ? "the Roblox client" : "Mocktail"} to run games. Setup steps are on Home.</p>
     {/if}
   </section>
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, setFlags, signIn } from "$lib/state.svelte";
+  import { app, onWindows, setFlags, signIn } from "$lib/state.svelte";
   import Avatar from "./Avatar.svelte";
   import Button from "./Button.svelte";
   import Icon from "./Icon.svelte";
@@ -7,7 +7,7 @@
   import Logo from "./Logo.svelte";
 
   let step = $state(0);
-  const steps = ["Mocktail", "Account", "Ready"];
+  const steps = $derived([onWindows() ? "Roblox" : "Mocktail", "Account", "Ready"]);
   const finish = () => setFlags({ onboarded: true });
 </script>
 
@@ -26,13 +26,16 @@
 
     {#if step === 0}
       <h1>Welcome to Vodka</h1>
-      <p class="lead muted">A launcher for Roblox on Linux. It runs the game through Mocktail, so let's check that first.</p>
+      <p class="lead muted">
+        {#if onWindows()}A launcher for Roblox. It starts the official Roblox client for you, so let's check that's installed.
+        {:else}A launcher for Roblox on Linux. It runs the game through Mocktail, so let's check that first.{/if}
+      </p>
       {#if app.mocktail?.installed}
         <div class="found glass">
           <span class="tick"><Icon name="check" size={20} /></span>
           <div>
-            <b>Mocktail {app.mocktail.version ?? ""} found</b>
-            <p class="faint">Flatpak · Roblox client {app.mocktail.robloxVersion ?? "downloads on first launch"}</p>
+            <b>{onWindows() ? "Roblox" : `Mocktail ${app.mocktail.version ?? ""}`} found</b>
+            <p class="faint">{onWindows() ? "Official client" : "Flatpak"} · {onWindows() ? "" : "Roblox client "}{app.mocktail.robloxVersion ?? "downloads on first launch"}</p>
           </div>
         </div>
       {:else}
@@ -74,7 +77,7 @@
       <h1>You're set</h1>
       <p class="lead muted">
         {#if app.account && app.mocktail?.installed}
-          Pick a game on Home and press Play. Vodka starts Mocktail and drops you straight into it.
+          Pick a game on Home and press Play. Vodka starts {onWindows() ? "Roblox" : "Mocktail"} and drops you straight into it.
         {:else}
           You can look around now. Home will tell you what's still missing before you can play.
         {/if}

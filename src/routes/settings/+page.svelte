@@ -29,11 +29,22 @@
     {/if}
   </section>
 
-  <section class="glass">
-    <h2>Performance</h2>
-    <TweaksEditor />
-  </section>
+  {#if app.mocktail?.engine !== "roblox"}
+    <section class="glass">
+      <h2>Performance</h2>
+      <TweaksEditor />
+    </section>
+  {/if}
 
+  {#if app.mocktail?.engine === "roblox"}
+    <section class="glass">
+      <h2>Launching</h2>
+      <p class="muted">
+        On Windows, Vodka starts the official Roblox client signed in as the account you pick, using a one-time ticket from Roblox. One game runs at a
+        time. Frame-rate options, several games at once and per-game stats are Linux features for now.
+      </p>
+    </section>
+  {:else}
   <section class="glass">
     <h2>Launching</h2>
     <p class="muted">
@@ -52,6 +63,7 @@
       {/if}
     </div>
   </section>
+  {/if}
 
   <section class="glass about">
     <h2>About</h2>

@@ -10,7 +10,7 @@
 <div class="home">
   {#if app.mocktail && !app.mocktail.installed}
     <section class="setup glass" aria-labelledby="setup-title">
-      <h2 id="setup-title">Mocktail isn't installed</h2>
+      <h2 id="setup-title">{app.mocktail.engine === "roblox" ? "Roblox isn't installed" : "Mocktail isn't installed"}</h2>
       <InstallGuide />
     </section>
   {/if}

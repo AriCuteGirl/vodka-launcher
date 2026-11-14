@@ -5,7 +5,7 @@
   import Modal from "$lib/components/Modal.svelte";
   import StateCard from "$lib/components/StateCard.svelte";
   import { elapsed, memory } from "$lib/format";
-  import { app, MAX_INSTANCES, refreshAccounts, removeAccount, signIn, stopInstance, switchAccount, toggleBatch } from "$lib/state.svelte";
+  import { app, MAX_INSTANCES, onWindows, refreshAccounts, removeAccount, signIn, stopInstance, switchAccount, toggleBatch } from "$lib/state.svelte";
   import { api } from "$lib/api";
   import { toast } from "$lib/state.svelte";
   import { toAppError, type Account, type Game } from "$lib/types";
@@ -118,7 +118,7 @@
   <section>
     <header class="sub">
       <h2>Running games</h2>
-      <span class="count">{app.instances.length} of {MAX_INSTANCES}</span>
+      <span class="count">{app.instances.length} of {onWindows() ? 1 : MAX_INSTANCES}</span>
     </header>
     {#if app.instances.length === 0}
       <StateCard icon="games" title="Nothing is running">
@@ -133,17 +133,19 @@
               <b>{inst.game.name}</b>
               <span class="faint">{inst.accountName} · {inst.phase === "playing" ? "Playing" : "Starting"} · {elapsed((now - inst.startedAtMs) / 1000)}</span>
             </div>
+            {#if !onWindows()}
             <dl>
               <div><dt>FPS</dt><dd>{inst.fps != null ? Math.round(inst.fps) : "…"}</dd></div>
               <div><dt>CPU</dt><dd>{Math.round(inst.cpuPercent)}%</dd></div>
               <div><dt>Memory</dt><dd>{memory(inst.memoryBytes)}</dd></div>
             </dl>
             <Button size="sm" icon="refresh" onclick={() => stopInstance(inst.id, true)}>Restart</Button>
+            {/if}
             <Button size="sm" variant="danger" icon="close" onclick={() => stopInstance(inst.id)}>Close</Button>
           </li>
         {/each}
       </ul>
-      {#each groups as g (g.game.universeId)}
+      {#each onWindows() ? [] : groups as g (g.game.universeId)}
         <div class="gather glass">
           <span><b>{g.game.name}</b> · {g.count} account{g.count === 1 ? "" : "s"} here</span>
           <Button size="sm" icon="players" onclick={() => (gathering = g)}>

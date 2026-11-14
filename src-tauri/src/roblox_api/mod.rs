@@ -324,6 +324,43 @@ impl Client {
         Ok((self.with_pictures(items).await, next))
     }
 
+    /// A one-time sign-in ticket for the official Roblox client (used by the Windows version).
+    /// It comes back in a response header, and Roblox first answers with a CSRF token to repeat.
+    pub async fn auth_ticket(&self, cookie: &str) -> Result<String> {
+        let url = "https://auth.roblox.com/v1/authentication-ticket";
+        let mut csrf: Option<String> = None;
+        for _ in 0..2 {
+            let mut req = self
+                .http
+                .post(url)
+                .header(header::COOKIE, format!(".ROBLOSECURITY={cookie}"))
+                .header(header::REFERER, "https://www.roblox.com/")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("RBXAuthenticationNegotiation", "1")
+                .body("{}");
+            if let Some(token) = &csrf {
+                req = req.header("x-csrf-token", token);
+            }
+            let res = req.send().await.map_err(|e| {
+                if e.is_connect() || e.is_timeout() { AppError::Offline } else { AppError::Api(e.without_url().to_string()) }
+            })?;
+            let header_text = |name: &str| res.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
+            if let Some(ticket) = header_text("rbx-authentication-ticket") {
+                return Ok(ticket);
+            }
+            match res.status() {
+                StatusCode::FORBIDDEN if csrf.is_none() => csrf = header_text("x-csrf-token"),
+                StatusCode::UNAUTHORIZED => return Err(AppError::SessionExpired),
+                StatusCode::TOO_MANY_REQUESTS => return Err(AppError::RateLimited),
+                status => return Err(AppError::Api(format!("sign-in ticket: HTTP {}", status.as_u16()))),
+            }
+            if csrf.is_none() {
+                break;
+            }
+        }
+        Err(AppError::Api("Roblox didn't give a sign-in ticket".into()))
+    }
+
     /// The account's Robux balance.
     pub async fn robux(&self, cookie: &str, user_id: u64) -> Result<u64> {
         let body = self.send(&format!("https://economy.roblox.com/v1/users/{user_id}/currency"), None, Some(cookie)).await?;
@@ -571,6 +608,17 @@ mod tests {
         assert!(!servers.is_empty());
         assert!(servers.windows(2).all(|w| w[0].playing <= w[1].playing));
         assert!(servers.iter().all(|s| s.max_players > 0 && s.playing < s.max_players));
+    }
+
+    /// Needs a real session in VODKA_TEST_COOKIE. Prints only the ticket's length.
+    #[tokio::test]
+    #[ignore]
+    async fn live_auth_ticket_is_issued() {
+        let cookie = std::env::var("VODKA_TEST_COOKIE").expect("VODKA_TEST_COOKIE");
+        let ticket = Client::new().auth_ticket(&cookie).await.unwrap();
+        println!("ticket_length={}", ticket.len());
+        assert!(ticket.len() > 20);
+        assert!(ticket.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
     }
 
     #[tokio::test]

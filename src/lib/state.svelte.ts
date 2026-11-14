@@ -55,6 +55,9 @@ export function dismissToast(id: number) {
 
 const fail = (e: unknown) => toast(toAppError(e).message, "danger");
 
+/** True where the game is run by the official Roblox client (Windows) instead of Mocktail. */
+export const onWindows = () => app.mocktail?.engine === "roblox";
+
 /** The active account's running game, if it has one. */
 export function myInstance(): Instance | null {
   return app.instances.find((i) => i.accountId === app.account?.id) ?? null;

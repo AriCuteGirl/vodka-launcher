@@ -49,6 +49,7 @@ const asUser = (a: Account): User => ({ id: a.id, name: a.name, displayName: a.d
 function mocktail(): MocktailStatus {
   const missing = scenario() === "nomocktail" || scenario() === "noflatpak";
   return {
+    engine: scenario() === "windows" ? "roblox" : "mocktail",
     flatpakAvailable: scenario() !== "noflatpak",
     installed: !missing,
     version: missing ? null : "1.0.5",

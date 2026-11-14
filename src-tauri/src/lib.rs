@@ -1,11 +1,19 @@
 mod accounts;
 mod chat;
 mod error;
+#[cfg(not(windows))]
 mod instances;
+#[cfg(windows)]
+#[path = "instances_windows.rs"]
+mod instances;
+// On Windows only its shared pieces are used; the Mocktail-specific parsing stays for Linux.
+#[cfg_attr(windows, allow(dead_code))]
 mod mocktail;
 mod roblox_api;
 mod settings;
 mod tweaks;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod windows_player;
 
 use error::{AppError, Result};
 use instances::{InstanceView, SharedManager};
@@ -56,7 +64,8 @@ fn config_dir(app: &AppHandle) -> Result<PathBuf> {
 }
 
 fn flatpak_data() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").ok_or_else(|| AppError::Other("HOME is not set.".into()))?;
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .ok_or_else(|| AppError::Other("Your home folder couldn't be found.".into()))?;
     Ok(instances::profiles::flatpak_data(&PathBuf::from(home)))
 }
 
@@ -440,7 +449,8 @@ async fn refresh_instance_games(app: AppHandle, state: State<'_, AppState>) -> R
         instances::set_game(&state.instances, instance_id, game);
         changed = true;
     }
-    Ok(changed)
+    // On Windows, presence is also how a game's start and end are noticed, so always refresh the list.
+    Ok(changed || cfg!(windows))
 }
 
 /// Whether the active account favorited and rated a game.
@@ -577,11 +587,14 @@ async fn item_offer(app: AppHandle, state: State<'_, AppState>, asset_id: u64) -
 
 /// A random identifier Roblox uses to make sure a retried purchase isn't charged twice.
 fn purchase_key() -> Result<String> {
-    use std::io::Read;
+    use std::hash::{BuildHasher, Hasher};
+    // Each `RandomState` is seeded from the operating system's random source, on every platform.
     let mut bytes = [0u8; 16];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut bytes))
-        .map_err(|e| AppError::Other(format!("Could not prepare the purchase: {e}")))?;
+    for half in bytes.chunks_mut(8) {
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+        half.copy_from_slice(&hasher.finish().to_le_bytes());
+    }
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
@@ -654,6 +667,16 @@ fn save_launch_options(app: AppHandle, account_id: Option<u64>, options: Option<
     })
 }
 
+#[cfg(not(windows))]
+fn rollback_env(profile: &instances::profiles::ProfilePaths) -> Vec<(&'static str, PathBuf)> {
+    vec![("MOCKTAIL_DATA_ROOT", profile.data.clone()), ("MOCKTAIL_CACHE_ROOT", profile.cache.clone()), ("MOCKTAIL_STATE_ROOT", profile.state.clone())]
+}
+
+#[cfg(windows)]
+fn rollback_env(_: &instances::profiles::ProfilePaths) -> Vec<(&'static str, PathBuf)> {
+    vec![]
+}
+
 /// Puts an account's profile back on its previous Roblox client, using Mocktail's own updater,
 /// and holds updates for that account so the next launch doesn't undo it.
 #[tauri::command]
@@ -662,14 +685,15 @@ async fn rollback_client(app: AppHandle, state: State<'_, AppState>, account_id:
         return Err(AppError::Other("That account is in a game. Close the game first.".into()));
     }
     let profile = instances::profiles::profile_paths(&flatpak_data()?, account_id);
+    if cfg!(windows) {
+        return Err(AppError::Other("Rolling back the client is a Mocktail feature and isn't available on Windows.".into()));
+    }
     if instances::profiles::client_version(&profile).is_none() {
         return Err(AppError::Other("This account hasn't played yet, so there is nothing to roll back.".into()));
     }
     let output = tokio::process::Command::new("flatpak")
         .args(["run", "--command=/app/lib/mocktail/mocktail_updater", mocktail::detect::APP_ID, "rollback"])
-        .env("MOCKTAIL_DATA_ROOT", &profile.data)
-        .env("MOCKTAIL_CACHE_ROOT", &profile.cache)
-        .env("MOCKTAIL_STATE_ROOT", &profile.state)
+        .envs(rollback_env(&profile))
         .output()
         .await
         .map_err(|e| AppError::Other(format!("Could not run Mocktail's updater: {e}")))?;
