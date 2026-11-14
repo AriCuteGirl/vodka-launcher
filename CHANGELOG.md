@@ -5,6 +5,9 @@
 Phase 4 (in progress): social.
 
 - Up to 10 games at once instead of 2: games beyond the second run from their own copy of Mocktail's binary. A five-second reminder shows each time another game is added.
+- Launches that fail because Roblox's sign-in doesn't answer are retried automatically (up to three times) instead of being reported as a crash. This was the cause of most "crashes" when starting many accounts.
+- Mocktail's own crash window no longer appears on top of Vodka's.
+- Fixed: Restart and Gather closed games without starting them again.
 - Gather: move every account you are running in a game into the same low-population public server with one button.
 - Auto-rejoin (off by default, per account or for all): a game that crashes or gets disconnected is started again, up to 5 times in 15 minutes.
 - Closing a game from Vodka is no longer reported as a crash.

@@ -365,7 +365,12 @@ export async function stopInstance(id: number, restart = false) {
 }
 
 function onExit(event: ExitEvent) {
-  if (event.rejoin === "crash") {
+  if (event.rejoin === "signin") {
+    // Not a crash: Roblox didn't answer the sign-in. Vodka is already trying again.
+    toast(`Roblox's sign-in didn't answer for ${event.accountName}. Trying again in a few seconds.`);
+  } else if (event.rejoin === "signin_limit") {
+    app.crash = { ...event, report: { ...event.report, outcome: "crashed" } };
+  } else if (event.rejoin === "crash") {
     toast(`${event.game.name} crashed for ${event.accountName}. Rejoining in a few seconds.`, "danger", 7000);
   } else if (event.rejoin === "disconnect") {
     toast(`${event.accountName} was disconnected from ${event.game.name}. Rejoining.`, "danger", 7000);

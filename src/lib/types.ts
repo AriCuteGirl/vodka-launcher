@@ -236,7 +236,7 @@ export interface ExitEvent {
   log: string[];
   restarting: boolean;
   /** Why Vodka is bringing the game back by itself, or "limit" when it stopped trying. */
-  rejoin: "crash" | "disconnect" | "limit" | null;
+  rejoin: "crash" | "disconnect" | "limit" | "signin" | "signin_limit" | null;
 }
 
 /** `null` means "don't override": the account falls back to the defaults, the defaults to Mocktail's own config. */

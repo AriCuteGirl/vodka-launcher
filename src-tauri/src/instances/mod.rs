@@ -11,7 +11,7 @@ pub mod slots;
 use crate::accounts;
 use crate::error::{AppError, Result};
 use crate::mocktail::detect::APP_ID;
-use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, launch_uri, parse_present_sample, redact};
+use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, is_signin_failure, launch_uri, parse_present_sample, redact};
 use crate::roblox_api::Game;
 use crate::settings::SavedAccount;
 use profiles::ProfilePaths;
@@ -62,6 +62,17 @@ pub struct Manager {
     instances: Vec<Instance>,
     /// When each account was last brought back automatically, to stop a crash loop.
     rejoins: Vec<(u64, Instant)>,
+    /// When each account's launch last failed because Roblox's sign-in didn't answer.
+    signin_failures: Vec<(u64, Instant)>,
+}
+
+/// A launch that fails at sign-in is tried again by itself this many times.
+const SIGNIN_RETRIES: usize = 3;
+const SIGNIN_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// How many sign-in failures this account has had recently, this one included.
+pub fn signin_failures_recently(history: &[(u64, Instant)], account_id: u64, now: Instant) -> usize {
+    history.iter().filter(|(id, at)| *id == account_id && now.duration_since(*at) < SIGNIN_WINDOW).count()
 }
 
 const REJOIN_LIMIT: usize = 5;
@@ -234,6 +245,8 @@ pub async fn launch(
         .env("MOCKTAIL_DATA_ROOT", &profile.data)
         .env("MOCKTAIL_CACHE_ROOT", &profile.cache)
         .env("MOCKTAIL_STATE_ROOT", &profile.state)
+        // Vodka reports failures itself; Mocktail's own "detected a crash" window would only stack on top.
+        .env("MOCKTAIL_DISABLE_FAILURE_DIALOG", "1")
         // Through the environment, so the session never shows up in a process list.
         .env("MOCKTAIL_ROBLOX_COOKIES", format!(".ROBLOSECURITY={cookie}"))
         .stdin(Stdio::null())
@@ -296,9 +309,31 @@ pub async fn launch(
         };
         let report = explain_kill(report, &inst.env);
 
+        // A launch that died at sign-in never reached the game. Try it again quietly, whatever the
+        // auto-rejoin setting says: the user asked for this game moments ago.
+        let signin_failed = !inst.stopping && log.iter().any(|l| is_signin_failure(l));
+        let mut report = report;
+        let mut signin_attempt = 0;
+
         // Decide whether Vodka brings the game back by itself.
         let wants_rejoin = inst.auto_rejoin && (inst.disconnected || (!inst.stopping && report.outcome == "crashed"));
-        let rejoin = if !wants_rejoin {
+        let rejoin = if signin_failed {
+            let mut m = manager.lock().unwrap();
+            let now = Instant::now();
+            m.signin_failures.retain(|(_, at)| now.duration_since(*at) < SIGNIN_WINDOW);
+            m.signin_failures.push((inst.account.id, now));
+            signin_attempt = signin_failures_recently(&m.signin_failures, inst.account.id, now);
+            if signin_attempt <= SIGNIN_RETRIES {
+                Some("signin")
+            } else {
+                report.detail = Some(format!(
+                    "Roblox's sign-in service didn't answer for {} after {} tries. Wait a minute and press Play again. Starting many accounts at once makes this more likely.",
+                    inst.account.display_name,
+                    SIGNIN_RETRIES + 1
+                ));
+                Some("signin_limit")
+            }
+        } else if !wants_rejoin {
             None
         } else {
             let mut m = manager.lock().unwrap();
@@ -311,7 +346,8 @@ pub async fn launch(
                 Some("limit")
             }
         };
-        let rejoining = matches!(rejoin, Some("crash" | "disconnect"));
+        let retrying_signin = rejoin == Some("signin");
+        let rejoining = matches!(rejoin, Some("crash" | "disconnect")) || retrying_signin;
         let restarting = (inst.restart && !inst.disconnected) || rejoining;
         let _ = app.emit(
             "instances://exit",
@@ -331,7 +367,11 @@ pub async fn launch(
             // record is still in scope here, and while it held them the new launch was refused
             // as "already in a game".
             drop(inst._claim);
-            let uri = if rejoining {
+            let uri = if retrying_signin {
+                // Wait longer each time, so several accounts retrying don't hit the sign-in together again.
+                tokio::time::sleep(std::time::Duration::from_secs(4 * signin_attempt as u64)).await;
+                inst.uri
+            } else if rejoining {
                 // Give a crashed client a moment to let go of its files and its slot.
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 rejoin_uri(&inst.uri, inst.game.place_id)
@@ -525,6 +565,17 @@ mod tests {
         assert_eq!(explain_kill(killed.clone(), &[]), killed);
         let clean = ExitReport { code: Some(0), outcome: "closed", detail: None };
         assert_eq!(explain_kill(clean.clone(), &[("MOCKTAIL_MEMORY_LIMIT_MB", "4096".into())]), clean);
+    }
+
+    #[test]
+    fn sign_in_failures_are_counted_per_account() {
+        let now = Instant::now();
+        let history = vec![(1, now), (1, now), (2, now)];
+        assert_eq!(signin_failures_recently(&history, 1, now), 2);
+        assert_eq!(signin_failures_recently(&history, 2, now), 1);
+        assert_eq!(signin_failures_recently(&history, 3, now), 0);
+        // The first three failures are retried, the fourth is reported.
+        assert!(3 <= SIGNIN_RETRIES && 4 > SIGNIN_RETRIES);
     }
 
     #[test]

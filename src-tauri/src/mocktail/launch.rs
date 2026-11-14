@@ -12,6 +12,12 @@ pub struct ExitReport {
     pub detail: Option<String>,
 }
 
+/// Mocktail checks the session with Roblox before starting and gives up if Roblox doesn't answer.
+/// That happens now and then when several accounts sign in close together; trying again works.
+pub fn is_signin_failure(line: &str) -> bool {
+    line.contains("authentication preflight failed")
+}
+
 /// Mocktail prints this once the game is drawing frames.
 pub fn is_running_marker(line: &str) -> bool {
     line.contains("[perf] present_sample")
@@ -110,6 +116,13 @@ mod tests {
         let line = "auth .ROBLOSECURITY=_|WARNING:-DO-NOT-SHARE-THIS.--abc";
         assert!(!redact(line).contains("abc"));
         assert_eq!(redact("  [runtime] ok"), "  [runtime] ok");
+    }
+
+    #[test]
+    fn spots_a_sign_in_that_roblox_did_not_answer() {
+        // The exact line from nine failed launches on 2026-11-13.
+        assert!(is_signin_failure("[FATAL] Typed Roblox authentication preflight failed: authentication service unavailable"));
+        assert!(!is_signin_failure("[FATAL] Vulkan device lost"));
     }
 
     #[test]
