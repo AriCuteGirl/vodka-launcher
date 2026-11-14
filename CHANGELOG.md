@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 (2026-11-14)
+
+- Linux release is now an AppImage: download it, make it executable, run it.
+- When Roblox's own servers fail (HTTP 5xx), Vodka retries reads a few times and then says Roblox is having trouble, instead of "a response Vodka didn't understand".
+
 ## 0.1.0 (2026-11-14)
 
 First release. Linux only.

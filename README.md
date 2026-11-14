@@ -28,15 +28,15 @@ Not yet: AUR, system-package and AppImage installs of Mocktail are not detected.
 
 ## Install
 
-Download the latest `vodka-launcher-…-linux-x86_64.tar.gz` from [Releases](https://github.com/AriCuteGirl/vodka-launcher/releases), then:
+Download the latest `vodka-launcher-…-x86_64.AppImage` from [Releases](https://github.com/AriCuteGirl/vodka-launcher/releases), then:
 
 ```bash
-tar -xzf vodka-launcher-*-linux-x86_64.tar.gz
-cd vodka-launcher-*-linux-x86_64
-./install.sh
+chmod +x vodka-launcher-*-x86_64.AppImage
+./vodka-launcher-*-x86_64.AppImage
 ```
 
-It installs for your user only (`~/.local`). `./install.sh --remove` undoes it.
+It needs nothing else installed besides Mocktail and a keyring. If it won't start with a FUSE error, install `fuse2`
+(or run it with `--appimage-extract-and-run`). To build it yourself: `./scripts/build-appimage.sh`.
 
 A Windows version is in progress and untested; see [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md).
 
