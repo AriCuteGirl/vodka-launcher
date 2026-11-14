@@ -291,6 +291,7 @@ export type ErrorKind =
   | "session_expired"
   | "rate_limited"
   | "offline"
+  | "roblox_down"
   | "api"
   | "keyring"
   | "blocked_url"

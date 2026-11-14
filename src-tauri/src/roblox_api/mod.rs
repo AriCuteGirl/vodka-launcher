@@ -111,6 +111,15 @@ impl Client {
             if status == StatusCode::UNAUTHORIZED {
                 return Err(if cookie.is_some() { AppError::SessionExpired } else { AppError::NotSignedIn });
             }
+            if status.is_server_error() {
+                // Roblox's own outage. Reads are safe to repeat; writes (buying, posting) never are.
+                if body.is_none() && attempt < RETRIES {
+                    tokio::time::sleep(backoff(attempt, None)).await;
+                    attempt += 1;
+                    continue;
+                }
+                return Err(AppError::RobloxDown(status.as_u16()));
+            }
             if !status.is_success() {
                 return Err(AppError::Api(format!("HTTP {}", status.as_u16())));
             }

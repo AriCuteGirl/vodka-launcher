@@ -19,6 +19,8 @@ pub enum AppError {
     RateLimited,
     #[error("Can't reach Roblox. Check your internet connection.")]
     Offline,
+    #[error("Roblox's servers are having trouble right now (HTTP {0}). Try again in a bit.")]
+    RobloxDown(u16),
     #[error("Roblox sent a response Vodka didn't understand ({0}).")]
     Api(String),
     #[error("The system keyring isn't available: {0}")]
@@ -43,6 +45,7 @@ impl AppError {
             Self::SessionExpired => "session_expired",
             Self::RateLimited => "rate_limited",
             Self::Offline => "offline",
+            Self::RobloxDown(_) => "roblox_down",
             Self::Api(_) => "api",
             Self::Keyring(_) => "keyring",
             Self::BlockedUrl => "blocked_url",
