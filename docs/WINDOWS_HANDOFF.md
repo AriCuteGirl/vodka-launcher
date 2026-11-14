@@ -1,0 +1,97 @@
+# Finishing the Windows version: handoff
+
+This is the brief for whoever continues the Windows port. Read `docs/claude.md` first; its rules still apply
+(ask first, plan before building, verify by actually running it, short reports, pinned dependencies, small commits).
+
+## Where things stand
+
+Vodka Launcher is a Roblox launcher. On Linux it drives **Mocktail** (a runtime for the Android Roblox client) and is
+complete through phase 4: accounts, up to 10 games at once, launch options, friends, its own chat and parties, avatar
+editor, marketplace with buying, auto-rejoin, gather. All of that is confirmed working on Linux by the owner.
+
+The Windows version exists as a **first cut that compiles and has never been run on Windows**.
+
+- Mocktail does not exist on Windows. There the "engine" is the **official Roblox client**.
+- The owner chose **"core first"**: accounts, launching as the chosen account, Games, Friends, Chat and parties,
+  Avatar, Marketplace. **No multi-instance on Windows.** Do not add it without asking: it means working around
+  Roblox's single-client lock next to its anti-cheat.
+
+## What was built for Windows
+
+| File | What it does |
+|---|---|
+| `src-tauri/src/instances_windows.rs` | Windows engine with the same public API as `instances/` (Linux). One game at a time. |
+| `src-tauri/src/windows_player.rs` | Pure functions: read Vodka's launch link, build the `roblox-player:` link, pick the newest installed client. Tested on Linux. |
+| `src-tauri/src/mocktail/detect.rs` | `detect()` has a `#[cfg(windows)]` version; `MocktailStatus.engine` is `"mocktail"` or `"roblox"`. |
+| `src-tauri/src/roblox_api/mod.rs` | `auth_ticket()`: one-time sign-in ticket from `auth.roblox.com/v1/authentication-ticket`. |
+| `src-tauri/src/lib.rs` | `#[cfg]` switch between the two engines; rollback disabled on Windows. |
+| `src-tauri/Cargo.toml` | `reqwest` uses rustls on Linux and native TLS (SChannel) on Windows, because `aws-lc-sys` won't cross-build with mingw. |
+| `scripts/build-windows.sh` | Cross-builds from Linux and writes `dist/vodka-launcher-windows.zip`. |
+| UI (`onWindows()` in `src/lib/state.svelte.ts`) | Says "Roblox" instead of "Mocktail", hides Performance settings, per-game stats, Restart and Gather. |
+
+How a Windows launch works:
+1. Read the account's session from the keyring (Windows Credential Manager through the `keyring` crate).
+2. Ask Roblox for a one-time sign-in ticket.
+3. Build `roblox-player:1+launchmode:play+gameinfo:<ticket>+launchtime:<ms>+placelauncherurl:<encoded PlaceLauncher URL>+browsertrackerid:<n>+robloxLocale:en_us+gameLocale:en_us+channel:`.
+4. Hand it to Windows with `rundll32.exe url.dll,FileProtocolHandler <link>`.
+5. There is no child process to watch (Roblox's launcher hands off and exits), so a game's start and end are learned
+   from the account's own presence, polled every 30 s by `refresh_instance_games`.
+
+## What is verified and what is not
+
+Verified on Linux:
+- The Windows target compiles with zero warnings; the Linux build and its 103 tests are unaffected.
+- `auth_ticket()` returns a real ticket for a real account (448 characters, URL-safe).
+- The `.exe` imports only system DLLs plus `WebView2Loader.dll`, which ships next to it.
+
+**Never run on Windows. Unknown, in rough order of risk:**
+1. Whether the app starts at all (WebView2 present? `WebView2Loader.dll` found?).
+2. Whether the login window works and `cookies_for_url` returns `.ROBLOSECURITY` under WebView2.
+3. Whether the session fits in Windows Credential Manager. A credential blob is limited to 2560 bytes and the
+   cookie is about 1150 characters; if it is stored as UTF-16 it may not fit. If it fails, split it across entries.
+4. Whether the `roblox-player:` link format is still what the current client accepts, including
+   `RequestGameJob` (specific server) and `RequestPrivateGame`.
+5. Whether `rundll32 url.dll,FileProtocolHandler` passes a link this long intact.
+6. Whether presence-based tracking feels right (a game shows "Starting" until presence says "in a game").
+7. Detection: `%LOCALAPPDATA%\Roblox\Versions\*\RobloxPlayerBeta.exe`. Newer installs may use a different layout.
+
+## Build
+
+```bash
+./scripts/build-windows.sh
+```
+
+Needs `rustup target add x86_64-pc-windows-gnu` and a mingw-w64 gcc. On this machine mingw comes from Nix and keeps
+`libpthread.a` in a separate store path; the script finds it.
+
+## Testing
+
+Two libvirt VMs exist on the owner's PC: `itch-test` (`qemu:///system`, Windows 10, 10 GB RAM, no GPU acceleration)
+and `win10` (`qemu:///session`). `itch-test` has the QEMU guest agent connected, SPICE graphics on 127.0.0.1:5900,
+no IP reported by `domifaddr`, and ports 22/3389/5985/445 closed. So files and commands have to go through the guest
+agent (`virsh qemu-agent-command` with `guest-file-*` and `guest-exec`) or SPICE; `virsh screenshot` shows the screen.
+
+Without GPU acceleration Roblox itself will probably not run well in the VM. The realistic split:
+- **In the VM:** app starts, onboarding, sign-in, keyring, Home/Games/Friends/Chat/Avatar/Marketplace load, and
+  pressing Play hands a link to Windows (Roblox's launcher should at least appear).
+- **On a real Windows PC with the owner:** an actual game join.
+
+Rules that apply to testing: never type the owner's Roblox credentials; the owner signs in. Do not start games on the
+owner's accounts unattended (an earlier project of theirs got an account banned after automated joins).
+
+## Suggested order
+
+1. Get the `.exe` into the VM, start it, fix whatever stops it from starting.
+2. Sign-in and keyring (items 2 and 3 above).
+3. Read-only pages.
+4. Launch hand-off, then a real join with the owner.
+5. Installer (NSIS or a zip), then attach a Windows build to a GitHub release.
+
+Ask the owner before: adding dependencies, anything touching multi-instance on Windows, or publishing a Windows release.
+
+## Things that are shared and must not break
+
+- The chat and party server is a Supabase project (`server/supabase/`), reached at a fixed URL in `src-tauri/src/chat.rs`.
+  It works the same from Windows. The Supabase connector in the Claude app was down when this was written.
+- Linux is the platform the owner uses daily. Run `cargo test` in `src-tauri` and `pnpm check` before every commit,
+  and rebuild/reinstall Linux with `./scripts/install-local.sh` if shared code changed.

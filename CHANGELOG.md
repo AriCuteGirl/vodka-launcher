@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-14)
+
+First release. Linux only.
+
+- A first cut of a Windows version (official Roblox client instead of Mocktail) is in the source. It compiles and has never been run on Windows.
 
 Phase 4 (in progress): social.
 

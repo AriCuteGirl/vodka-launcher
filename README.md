@@ -26,10 +26,25 @@ before the first time; the risk to your accounts is yours.
 
 Not yet: AUR, system-package and AppImage installs of Mocktail are not detected.
 
+## Install
+
+Download the latest `vodka-launcher-…-linux-x86_64.tar.gz` from [Releases](https://github.com/AriCuteGirl/vodka-launcher/releases), then:
+
+```bash
+tar -xzf vodka-launcher-*-linux-x86_64.tar.gz
+cd vodka-launcher-*-linux-x86_64
+./install.sh
+```
+
+It installs for your user only (`~/.local`). `./install.sh --remove` undoes it.
+
+A Windows version is in progress and untested; see [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md).
+
 ## Requirements
 
 - Linux with Flatpak and Mocktail (`flatpak install flathub space.bigrat.mocktail`)
 - A running Secret Service keyring (GNOME Keyring, KWallet, KeePassXC)
+- To run a release: `webkit2gtk-4.1`, `gtk3`, `libsoup3` and `libsecret` (most desktops have them)
 - To build: Rust 1.88+, Node 22+, pnpm, and Tauri's Linux dependencies (`webkit2gtk-4.1`)
 
 ## Run and build
