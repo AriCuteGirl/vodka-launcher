@@ -119,8 +119,10 @@ async fn mocktail_status() -> Result<MocktailStatus> {
     blocking(|| Ok(mocktail::detect::detect())).await
 }
 
+// Async on purpose: a synchronous command runs on the main thread, and building a webview window there deadlocks
+// on Windows (the sign-in window stayed blank on about:blank).
 #[tauri::command]
-fn begin_login(app: AppHandle) -> Result<()> {
+async fn begin_login(app: AppHandle) -> Result<()> {
     accounts::open_login(&app)
 }
 
