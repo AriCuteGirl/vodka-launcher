@@ -55,6 +55,8 @@ struct Instance {
 pub struct Manager {
     next_id: u32,
     instances: Vec<Instance>,
+    /// Names of games given up on since the last `take_given_up`, so the user can be told.
+    given_up: Vec<String>,
 }
 
 pub type SharedManager = Arc<Mutex<Manager>>;
@@ -161,9 +163,18 @@ pub fn note_presence(manager: &SharedManager, id: u32, in_game: bool) -> bool {
         }
     }
     if ended {
+        if let Some(inst) = m.instances.iter().find(|i| i.id == id && !i.playing) {
+            let name = inst.game.name.clone();
+            m.given_up.push(name);
+        }
         m.instances.retain(|i| i.id != id);
     }
     false
+}
+
+/// Games that never started since the last call. Roblox's own error window (if any) says why.
+pub fn take_given_up(manager: &SharedManager) -> Vec<String> {
+    std::mem::take(&mut manager.lock().unwrap().given_up)
 }
 
 pub fn running_games(manager: &SharedManager) -> Vec<(u32, u64, u64)> {

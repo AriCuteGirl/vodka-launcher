@@ -66,7 +66,7 @@
       <p class="game">{inst.game.name}</p>
       <p class="who faint">{inst.accountName}{#if !onWindows()} · {inst.fps != null ? `${Math.round(inst.fps)} FPS · ` : ""}{Math.round(inst.cpuPercent)}% CPU · {memory(inst.memoryBytes)}{/if}</p>
       {#if inst.phase === "starting"}
-        <pre class="selectable" aria-label="Mocktail output">{inst.log.slice(-12).join("\n") || "Waiting for Mocktail…"}</pre>
+        <pre class="selectable" aria-label={onWindows() ? "Game status" : "Mocktail output"}>{inst.log.slice(-12).join("\n") || (onWindows() ? "Waiting for Roblox to report you in the game…" : "Waiting for Mocktail…")}</pre>
       {/if}
       <div class="row">
         {#if !onWindows()}<button class="mini" onclick={() => stopInstance(inst.id, true)}><Icon name="refresh" size={14} />Restart</button>{/if}

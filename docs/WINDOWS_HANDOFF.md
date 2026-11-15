@@ -57,6 +57,11 @@ Verified in the `itch-test` VM (Windows 10 22H2, WebView2 157) on 2026-11-15:
 - The session is stored as `roblox-session:<id>.vodka-launcher` in Credential Manager, it fits, and it is read back
   after a restart. Item 3 is done.
 - Home, Friends, Avatar, Marketplace and the Chat intro load with real data.
+- **Roblox refuses to run in a VM** ("Virtual Machine detected. Roblox can't be used in a Virtual Machine or Virtual
+  Desktop"), so a real launch can only be tested on a real Windows PC. Don't try to hide the VM from Roblox.
+  Pressing Play in the VM did get a sign-in ticket and hand the link to Windows; the client then quit with that error.
+- A launch that never shows up in presence is dropped after 4 minutes and the user is now told why (it used to vanish
+  silently). The status box says "Waiting for Roblox…" on Windows instead of "Waiting for Mocktail…".
 - Debugging the sign-in window: start Vodka with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`
   (task `VodkaDebug` does) and talk DevTools protocol to `127.0.0.1:9222` inside the guest.
 

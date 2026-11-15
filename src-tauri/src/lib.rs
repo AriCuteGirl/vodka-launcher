@@ -451,6 +451,16 @@ async fn refresh_instance_games(app: AppHandle, state: State<'_, AppState>) -> R
         instances::set_game(&state.instances, instance_id, game);
         changed = true;
     }
+    #[cfg(windows)]
+    for name in instances::take_given_up(&state.instances) {
+        let _ = tauri::Emitter::emit(
+            &app,
+            "instances://error",
+            AppError::Other(format!(
+                "{name} didn't start: Roblox never showed this account in a game. If Roblox showed an error window, it says why."
+            )),
+        );
+    }
     // On Windows, presence is also how a game's start and end are noticed, so always refresh the list.
     Ok(changed || cfg!(windows))
 }
