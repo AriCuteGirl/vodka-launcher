@@ -1,0 +1,48 @@
+# Vodka Launcher for Windows: preview, please test
+
+This is an early Windows build. Most of it has only been tried in a virtual machine, and Roblox refuses to run in
+one, so **nobody has joined a game with it on Windows yet.** That is the main thing to test.
+
+Vodka is not affiliated with Roblox Corporation.
+
+## Install
+
+1. You need Windows 10 or 11 with Roblox already installed (from roblox.com, the normal way).
+2. Unzip `vodka-launcher-windows.zip` anywhere. Keep `Vodka Launcher.exe` and `WebView2Loader.dll` in the same folder.
+3. Run `Vodka Launcher.exe`. The program isn't signed, so Windows SmartScreen may warn you: click
+   **More info → Run anyway**.
+
+Your Roblox session is stored in Windows Credential Manager (the same place Windows keeps other app logins) and is
+only ever sent to roblox.com.
+
+## Already checked (in a Windows 10 VM)
+
+- The app starts.
+- It finds the installed Roblox and shows its version.
+- Signing in through Roblox's own login page works (Quick Sign-in was used).
+- The session is saved and still there after closing and reopening Vodka.
+- Home, Friends, Avatar, Marketplace and the Chat page load with real data.
+- Pressing Play gets a one-time sign-in ticket from Roblox and hands the game link to Windows.
+
+## Please test, in this order
+
+Use your own account. Write down what happened for each step, plus any error text (screenshots help).
+
+1. **Play a game from Home.** Does Roblox open, already signed in as you, and put you in that game?
+2. **Vodka while you play.** Within about a minute of being in the game, does the side panel switch from "Starting"
+   to showing the game as running? Does it show the right game?
+3. **Leave the game** (close Roblox). Within about a minute, does Vodka notice the game ended?
+4. **Join a friend** from the Friends list while they are in a game. Do you land in their server?
+5. **A game that doesn't start.** If Roblox fails to open, Vodka should say so after about 4 minutes. Does it?
+6. **Close from Vodka.** Start a game, then press Close in Vodka's side panel. Does Roblox close?
+7. **Restart Vodka** after signing in. Are you still signed in?
+
+## Not in the Windows version (on purpose)
+
+- **One game at a time.** Running several Roblox windows at once (multi-instance) is Linux-only for now.
+- No performance settings, per-game stats, Restart or Gather. These need Mocktail, which is Linux-only.
+
+## If something goes wrong
+
+Send the owner what you did, what you expected, what happened, and any error text. Closing Vodka never closes a game
+already running in Roblox, and nothing in Vodka spends Robux without a confirmation that shows the price.
