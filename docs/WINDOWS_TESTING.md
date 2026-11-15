@@ -37,9 +37,23 @@ Use your own account. Write down what happened for each step, plus any error tex
 6. **Close from Vodka.** Start a game, then press Close in Vodka's side panel. Does Roblox close?
 7. **Restart Vodka** after signing in. Are you still signed in?
 
+## Several accounts at once (optional, risky)
+
+Off by default. **Read the warning before you turn it on.** Roblox's Terms of Use don't allow working around its
+one-client limit, Roblox is actively blocking tools that do it, and accounts that do it can be restricted or banned.
+Only try it with accounts you're willing to lose. Don't use automation or exploits with it.
+
+1. Close every Roblox window.
+2. In Vodka: **Settings → Several games at once → Turn on…**, read the warning, and accept it.
+3. Add a second account (**Players → Add account**).
+4. Play a game on the first account. Switch to the second account (top right) and press Play again. Vodka shows a
+   reminder each time another game starts.
+5. Do both Roblox windows open and stay open? Is each one signed in as the right account?
+6. Close one game from Vodka's side panel. Does only that window close?
+7. If the second window closes the first one, or won't open, write down exactly what happened.
+
 ## Not in the Windows version (on purpose)
 
-- **One game at a time.** Running several Roblox windows at once (multi-instance) is Linux-only for now.
 - No performance settings, per-game stats, Restart or Gather. These need Mocktail, which is Linux-only.
 
 ## If something goes wrong

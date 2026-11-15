@@ -29,7 +29,8 @@ export const app = $state({
   toasts: [] as Toast[],
   crash: null as ExitEvent | null,
   /** A launch waiting for the user to accept the multi-instance warning. */
-  pendingLaunch: null as { name: string; run: () => Promise<unknown> } | null,
+  /** The several-games warning: for a game about to start, or (name and run null) turned on from Settings. */
+  pendingLaunch: null as { name: string | null; run: (() => Promise<unknown>) | null } | null,
   /** Accounts ticked on the Players page; the next Play or Join starts for all of them. */
   batch: [] as number[],
   /** The server and account picker, when open. `target` is set when the server is already decided (joining a friend). */
@@ -324,16 +325,27 @@ async function start(name: string, run: () => Promise<unknown>) {
 function warnAboutLoad() {
   const count = app.instances.length + 1;
   if (count < 2) return;
+  if (onWindows()) {
+    toast(`Starting Roblox window ${count}. Running several is unofficial: each one adds account risk, and Roblox may block it in any update.`, "danger", 5000);
+    return;
+  }
   toast(`Starting game ${count}. Together they need about ${(count * GAME_MEMORY_GB).toFixed(1)} GB of memory, and each one adds account risk.`, "danger", 5000);
+}
+
+/** Shows the several-games warning from Settings, with no game waiting on it. */
+export function askMultiInstance() {
+  app.pendingLaunch = { name: null, run: null };
 }
 
 export async function acceptMultiInstance() {
   const pending = app.pendingLaunch;
   app.pendingLaunch = null;
   await setFlags({ multiInstanceAccepted: true });
-  if (pending && app.settings.multiInstanceAccepted) {
+  if (pending?.run && app.settings.multiInstanceAccepted) {
     warnAboutLoad();
     await launch(pending.run);
+  } else if (app.settings.multiInstanceAccepted && onWindows()) {
+    toast("Several games at once is on. If Roblox is open right now, close it first: Vodka has to start before Roblox for this to work.", "ok", 6000);
   }
 }
 

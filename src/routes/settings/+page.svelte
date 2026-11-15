@@ -3,7 +3,8 @@
   import Button from "$lib/components/Button.svelte";
   import Logo from "$lib/components/Logo.svelte";
   import TweaksEditor from "$lib/components/TweaksEditor.svelte";
-  import { app, removeAccount, setFlags, signIn } from "$lib/state.svelte";
+  import { app, askMultiInstance, onWindows, removeAccount, setFlags, signIn } from "$lib/state.svelte";
+  import { version } from "../../../package.json";
 </script>
 
 <div class="settings">
@@ -40,9 +41,24 @@
     <section class="glass">
       <h2>Launching</h2>
       <p class="muted">
-        On Windows, Vodka starts the official Roblox client signed in as the account you pick, using a one-time ticket from Roblox. One game runs at a
-        time. Frame-rate options, several games at once and per-game stats are Linux features for now.
+        On Windows, Vodka starts the official Roblox client signed in as the account you pick, using a one-time ticket from Roblox. Frame-rate
+        options, per-game stats, Restart and Gather are Linux features for now.
       </p>
+      <div class="row">
+        <div class="grow">
+          <b>Several games at once</b>
+          <p class="faint">
+            {app.settings.multiInstanceAccepted
+              ? "On. Each account can run its own Roblox window, with a reminder each time. Unofficial: Roblox may block it, and it adds account risk."
+              : "Off: one game at a time. Turning it on is unofficial and risky; Vodka explains before it does anything."}
+          </p>
+        </div>
+        {#if app.settings.multiInstanceAccepted}
+          <Button onclick={() => setFlags({ multiInstanceAccepted: false })}>Turn off</Button>
+        {:else}
+          <Button onclick={askMultiInstance}>Turn on…</Button>
+        {/if}
+      </div>
     </section>
   {:else}
   <section class="glass">
@@ -70,15 +86,19 @@
     <div class="row">
       <Logo size={44} />
       <div class="grow">
-        <b>Vodka Launcher 0.1.0</b>
-        <p class="faint">A Roblox launcher for Linux. Apache-2.0 licensed.</p>
+        <b>Vodka Launcher {version}</b>
+        <p class="faint">A Roblox launcher{onWindows() ? "" : " for Linux"}. Apache-2.0 licensed.</p>
       </div>
       <Button variant="ghost" onclick={() => setFlags({ onboarded: false })}>Run setup again</Button>
     </div>
-    <p class="muted">
-      Vodka runs Roblox through <b>Mocktail</b>, an Apache-2.0 compatibility runtime by the Mocktail Project Authors. Vodka starts Mocktail as a
-      separate program and does not include or modify it. The Roblox client is downloaded by Mocktail and is not part of Vodka.
-    </p>
+    {#if onWindows()}
+      <p class="muted">On Windows, Vodka starts the official Roblox client you installed from roblox.com. The client is not part of Vodka.</p>
+    {:else}
+      <p class="muted">
+        Vodka runs Roblox through <b>Mocktail</b>, an Apache-2.0 compatibility runtime by the Mocktail Project Authors. Vodka starts Mocktail as a
+        separate program and does not include or modify it. The Roblox client is downloaded by Mocktail and is not part of Vodka.
+      </p>
+    {/if}
     <p class="faint">
       Vodka Launcher is an independent project. It is not affiliated with, endorsed by, or sponsored by Roblox Corporation, Mocktail, or Lunar
       Client. Roblox is a trademark of Roblox Corporation.

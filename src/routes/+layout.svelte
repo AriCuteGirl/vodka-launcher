@@ -10,7 +10,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
-  import { acceptMultiInstance, app, boot, MAX_INSTANCES, play } from "$lib/state.svelte";
+  import { acceptMultiInstance, app, boot, MAX_INSTANCES, onWindows, play } from "$lib/state.svelte";
   import { onMount } from "svelte";
 
   let { children } = $props();
@@ -81,18 +81,27 @@
   <Modal title="Run several games at once?" onclose={() => (app.pendingLaunch = null)}>
     <div class="warn">
       <p>
-        You're about to start <b>{app.pendingLaunch.name}</b> while another game is running. Before you do:
+        {#if app.pendingLaunch.name}You're about to start <b>{app.pendingLaunch.name}</b> while another game is running.{:else}You're about to let Vodka run several games at once.{/if}
+        Before you do:
       </p>
       <ul>
         <li>Roblox's Terms of Use don't allow working around its limit on running clients. Accounts that do can be restricted or banned.</li>
-        <li>Mocktail's developers chose not to support this. If it breaks, it's on Vodka, not on them.</li>
-        <li>Vodka runs one game per account, up to {MAX_INSTANCES}. Each needs about 1.5 GB of memory.</li>
+        {#if onWindows()}
+          <li>
+            On Windows, Vodka does this by holding Roblox's one-client lock before Roblox starts, like other multi-instance tools. Roblox is
+            actively blocking such tools, so it may stop working, or get your accounts flagged, after any Roblox update.
+          </li>
+          <li>Close Roblox before turning this on. Vodka can only allow several games if it starts before the first Roblox window.</li>
+        {:else}
+          <li>Mocktail's developers chose not to support this. If it breaks, it's on Vodka, not on them.</li>
+          <li>Vodka runs one game per account, up to {MAX_INSTANCES}. Each needs about 1.5 GB of memory.</li>
+        {/if}
       </ul>
       <p class="faint">This is your call and your risk. Vodka asks once and remembers the answer.</p>
     </div>
     {#snippet actions()}
       <Button onclick={() => (app.pendingLaunch = null)}>Cancel</Button>
-      <Button variant="primary" onclick={acceptMultiInstance}>I understand, start it</Button>
+      <Button variant="primary" onclick={acceptMultiInstance}>{app.pendingLaunch?.name ? "I understand, start it" : "I understand, turn it on"}</Button>
     {/snippet}
   </Modal>
 {/if}

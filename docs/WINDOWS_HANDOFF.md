@@ -13,8 +13,8 @@ The Windows version exists as a **first cut that compiles and has never been run
 
 - Mocktail does not exist on Windows. There the "engine" is the **official Roblox client**.
 - The owner chose **"core first"**: accounts, launching as the chosen account, Games, Friends, Chat and parties,
-  Avatar, Marketplace. **No multi-instance on Windows.** Do not add it without asking: it means working around
-  Roblox's single-client lock next to its anti-cheat.
+  Avatar, Marketplace. Multi-instance was added later at the owner's request, off by default and behind two warnings
+  (see below). Don't extend it to anything that opens or changes Roblox processes.
 
 ## What was built for Windows
 
@@ -62,6 +62,13 @@ Verified in the `itch-test` VM (Windows 10 22H2, WebView2 157) on 2026-11-15:
   Pressing Play in the VM did get a sign-in ticket and hand the link to Windows; the client then quit with that error.
 - A launch that never shows up in presence is dropped after 4 minutes and the user is now told why (it used to vanish
   silently). The status box says "Waiting for Roblox…" on Windows instead of "Waiting for Mocktail…".
+- **Multi-instance (added 2026-11-15 at the owner's request, with two warnings):** off by default. Turning it on in
+  Settings shows a warning (Terms of Use, Roblox actively blocking such tools, close Roblox first), and each extra game
+  shows a reminder. While it is on, Vodka holds the named mutex `ROBLOX_singletonEvent` in its own process before the
+  first client starts, as MultiBloxy does. Vodka never touches Roblox processes to free the lock; if Roblox was already
+  open, the user is told to close it. One game per account. Closing a game kills only the client whose command line
+  carries that launch's `browsertrackerid`. Verified in the VM: the lock is held when on and released when off. Not
+  verified: whether current Roblox builds actually allow a second client this way (needs a real PC).
 - Debugging the sign-in window: start Vodka with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`
   (task `VodkaDebug` does) and talk DevTools protocol to `127.0.0.1:9222` inside the guest.
 

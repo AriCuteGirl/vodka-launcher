@@ -878,6 +878,14 @@ fn set_flags(app: AppHandle, flags: Flags) -> Result<Settings> {
             s.multi_instance_accepted = v;
         }
     })
+    .inspect(|s| {
+        #[cfg(windows)]
+        if flags.multi_instance_accepted.is_some() {
+            instances::set_multi_instance(&app.state::<AppState>().instances, s.multi_instance_accepted);
+        }
+        #[cfg(not(windows))]
+        let _ = s;
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
