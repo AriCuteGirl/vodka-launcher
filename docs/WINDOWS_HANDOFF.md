@@ -44,7 +44,15 @@ Verified on Linux:
 - `auth_ticket()` returns a real ticket for a real account (448 characters, URL-safe).
 - The `.exe` imports only system DLLs plus `WebView2Loader.dll`, which ships next to it.
 
-**Never run on Windows. Unknown, in rough order of risk:**
+Verified in the `itch-test` VM (Windows 10 22H2, WebView2 157) on 2026-11-15:
+- The app starts and renders (WebView2 and `WebView2Loader.dll` found). Item 1 below is done.
+- Before Roblox is installed, onboarding says so. After the official installer runs, it shows "Roblox found" with
+  the version. The `Versions\*\RobloxPlayerBeta.exe` layout and the `roblox-player` handler are as expected. Item 7 is done.
+- How to drive the VM: `guest-exec` runs as SYSTEM in session 0, so start GUI programs through a scheduled task with
+  an `Interactive` principal for user `tester` (task `VodkaTest` starts `C:\vodka\app\Vodka Launcher.exe`).
+  A single `guest-file-write` argument must stay under 128 KiB, so copy files in ~72 KiB chunks.
+
+**Still unknown, in rough order of risk:**
 1. Whether the app starts at all (WebView2 present? `WebView2Loader.dll` found?).
 2. Whether the login window works and `cookies_for_url` returns `.ROBLOSECURITY` under WebView2.
 3. Whether the session fits in Windows Credential Manager. A credential blob is limited to 2560 bytes and the
