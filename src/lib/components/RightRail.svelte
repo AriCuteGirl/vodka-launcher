@@ -88,7 +88,7 @@
         <dt>{onWindows() ? "Runs with" : "Mocktail"}</dt>
         <dd>{m.version ?? "unknown"}{onWindows() ? "" : " · Flatpak"}</dd>
         <dt>Roblox client</dt>
-        <dd>{m.robloxVersion ?? "downloads on first launch"}</dd>
+        <dd title={m.robloxVersion ?? undefined}>{m.robloxVersion ?? "downloads on first launch"}</dd>
       </dl>
     {:else}
       <p class="status bad"><i></i>Not installed</p>
@@ -152,8 +152,13 @@
   }
   dd {
     margin: 0;
+    min-width: 0;
     text-align: right;
     color: var(--text-1);
+    /* Windows client versions are long folder names like version-4ea8e85481e34f46. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .small {
     font-size: var(--fs-sm);

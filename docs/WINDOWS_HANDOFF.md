@@ -51,6 +51,14 @@ Verified in the `itch-test` VM (Windows 10 22H2, WebView2 157) on 2026-11-15:
 - How to drive the VM: `guest-exec` runs as SYSTEM in session 0, so start GUI programs through a scheduled task with
   an `Interactive` principal for user `tester` (task `VodkaTest` starts `C:\vodka\app\Vodka Launcher.exe`).
   A single `guest-file-write` argument must stay under 128 KiB, so copy files in ~72 KiB chunks.
+- Sign-in works (owner used Roblox Quick Sign-in). It first stayed blank on `about:blank`: `begin_login` was a sync
+  command, which runs on the main thread, and building a webview window there deadlocks on Windows. It is async now.
+  Keep every command that opens a window async. Item 2 is done.
+- The session is stored as `roblox-session:<id>.vodka-launcher` in Credential Manager, it fits, and it is read back
+  after a restart. Item 3 is done.
+- Home, Friends, Avatar, Marketplace and the Chat intro load with real data.
+- Debugging the sign-in window: start Vodka with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`
+  (task `VodkaDebug` does) and talk DevTools protocol to `127.0.0.1:9222` inside the guest.
 
 **Still unknown, in rough order of risk:**
 1. Whether the app starts at all (WebView2 present? `WebView2Loader.dll` found?).
