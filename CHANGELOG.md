@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-16)
 
 More than one game: a rail on the left switches between Roblox and Luduvo, each with its own pages, account and colour.
 
