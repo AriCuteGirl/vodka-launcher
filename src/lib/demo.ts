@@ -48,7 +48,7 @@ const demoItem = (id: number, name: string, price: number | null, slot: string, 
   sales: id * 7, likes: id, dislikes: 2, owners: null, myVote: 0, expiresAt: null,
 });
 const owned = (id: number, name: string, assetType: string, slot: string): LuduvoOwned => ({
-  id, variant: 0, name, assetType, slot, pictureUrl: null,
+  id, variant: 0, name, assetType, slot, pictureUrl: null, variantName: null, variantColor: null,
   slots: assetType === "avatar_bundle" ? ["head", "torso", "left_arm", "right_arm", "left_leg", "right_leg"] : [slot],
 });
 const luduvoOwned: LuduvoOwned[] = [

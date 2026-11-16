@@ -250,6 +250,8 @@ pub struct Client {
     cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     /// The game Vodka started, while it runs.
     pub running: Mutex<Option<Running>>,
+    /// Each item's colour variants, looked up once: they don't change while Vodka runs.
+    variants: Mutex<std::collections::HashMap<u64, Vec<parse::Variant>>>,
 }
 
 impl Client {
@@ -261,7 +263,7 @@ impl Client {
             .timeout(Duration::from_secs(15))
             .build()
             .expect("HTTP client");
-        Self { http, access: Mutex::new(None), refreshing: tokio::sync::Mutex::new(()), cancel: Mutex::new(None), running: Mutex::new(None) }
+        Self { http, access: Mutex::new(None), refreshing: tokio::sync::Mutex::new(()), cancel: Mutex::new(None), running: Mutex::new(None), variants: Mutex::new(Default::default()) }
     }
 
     fn current(&self) -> Option<String> {
@@ -572,7 +574,40 @@ impl Client {
         // `/me/equipped` only takes writes; the website reads your look from your profile.
         let me = self.me().await?;
         let json = self.authed(Method::GET, &format!("/users/{}/profile", me.id)).await?;
-        Ok(parse::owned_list(&json))
+        Ok(self.with_variants(parse::owned_list(&json)).await)
+    }
+
+    /// Fills in the picture, colour name and colour of each item that's a colour variant (Luduvo lists the item's
+    /// default picture for every variant).
+    async fn with_variants(&self, mut items: Vec<OwnedItem>) -> Vec<OwnedItem> {
+        let mut wanted: Vec<u64> = items.iter().filter(|i| i.variant > 0).map(|i| i.id).collect();
+        wanted.sort_unstable();
+        wanted.dedup();
+        wanted.retain(|id| !self.variants.lock().unwrap().contains_key(id));
+        let found = futures_util::future::join_all(wanted.iter().map(|id| async move {
+            let list = self.public(&format!("/items/{id}/variants")).await.map(|j| parse::variants(&j));
+            (*id, list)
+        }))
+        .await;
+        {
+            let mut cache = self.variants.lock().unwrap();
+            for (id, list) in found {
+                if let Ok(list) = list {
+                    cache.insert(id, list);
+                }
+            }
+        }
+        let cache = self.variants.lock().unwrap();
+        for item in items.iter_mut().filter(|i| i.variant > 0) {
+            if let Some(v) = cache.get(&item.id).and_then(|l| l.iter().find(|v| v.index == item.variant)) {
+                if v.picture_url.is_some() {
+                    item.picture_url = v.picture_url.clone();
+                }
+                item.variant_name = Some(v.name.clone()).filter(|n| !n.is_empty());
+                item.variant_color = v.color.clone();
+            }
+        }
+        items
     }
 
     /// Wears exactly `items`, replacing what you had on. Luduvo keeps bundles (body parts) apart from everything
@@ -608,7 +643,7 @@ impl Client {
         let json = self.authed(Method::GET, &format!("/me/inventory?{}", url.query().unwrap_or_default())).await?;
         #[cfg(debug_assertions)]
         eprintln!("[luduvo] inventory shape: {}", parse::shape(&json));
-        Ok(parse::owned_list(&json))
+        Ok(self.with_variants(parse::owned_list(&json)).await)
     }
 
     pub async fn outfits(&self) -> Result<Vec<Outfit>> {

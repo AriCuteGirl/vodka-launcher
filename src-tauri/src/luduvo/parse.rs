@@ -330,6 +330,9 @@ pub struct OwnedItem {
     /// Every slot it takes: a bundle covers up to six body parts, anything else one.
     pub slots: Vec<String>,
     pub picture_url: Option<String>,
+    /// For a colour variant: its name ("Blue") and colour (`#AABBCC`).
+    pub variant_name: Option<String>,
+    pub variant_color: Option<String>,
 }
 
 /// An entry from the inventory or the equipped list. Entries may be flat or wrap the item (`{"item": {...}}`),
@@ -375,6 +378,8 @@ pub fn owned_item(v: &Value) -> Option<OwnedItem> {
         slot,
         slots,
         picture_url: variant_picture.or_else(|| asset_url(inner.get("thumbnail_url"))).or_else(|| asset_url(v.get("thumbnail_url"))),
+        variant_name: None,
+        variant_color: None,
     })
 }
 
@@ -383,6 +388,46 @@ pub fn owned_list(v: &Value) -> Vec<OwnedItem> {
     let list = ["equipped_items", "items", "equipped", "inventory", "data"].iter().find_map(|k| v.get(*k).and_then(Value::as_array)).or_else(|| v.as_array());
     let mut seen = std::collections::HashSet::new();
     list.map(|l| l.iter().filter_map(owned_item).filter(|i| seen.insert((i.id, i.variant))).collect()).unwrap_or_default()
+}
+
+/// One colour of an item, from `/items/{id}/variants`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variant {
+    pub index: u64,
+    pub name: String,
+    /// `#RRGGBB`, only when it is one.
+    pub color: Option<String>,
+    pub picture_url: Option<String>,
+}
+
+pub fn variants(v: &Value) -> Vec<Variant> {
+    let safe_key = |k: &str| {
+        let k = k.trim_start_matches('/');
+        (!k.is_empty() && !k.contains("..") && k.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))).then(|| k.to_owned())
+    };
+    v.get("variants")
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|x| {
+                    Some(Variant {
+                        index: x.get("variant_index")?.as_u64()?,
+                        name: text(x, "name"),
+                        color: x
+                            .get("hex_code")
+                            .and_then(Value::as_str)
+                            .filter(|h| h.len() == 7 && h.starts_with('#') && h[1..].bytes().all(|b| b.is_ascii_hexdigit()))
+                            .map(str::to_owned),
+                        picture_url: x
+                            .get("thumbnail_key")
+                            .and_then(Value::as_str)
+                            .and_then(safe_key)
+                            .and_then(|k| asset_url(Some(&Value::String(format!("https://assets.luduvo.com/{k}"))))),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -892,6 +937,16 @@ mod tests {
         assert_eq!(l[1].slots, vec!["shirt"]);
         assert_eq!(l[2].slots, vec!["hat"]);
         assert_eq!(l[3].slots, vec!["left_leg", "right_leg"]);
+    }
+
+    #[test]
+    fn reads_colour_variants() {
+        let l = variants(&json!({ "variants": [
+            { "variant_index": 1, "name": "White", "hex_code": "#EDEDED", "thumbnail_key": "item_previews/1738/v1/ab.png" },
+            { "variant_index": 2, "name": "Odd", "hex_code": "red; x", "thumbnail_key": "../x.png" }
+        ] }));
+        assert_eq!(l[0], Variant { index: 1, name: "White".into(), color: Some("#EDEDED".into()), picture_url: Some("https://assets.luduvo.com/item_previews/1738/v1/ab.png".into()) });
+        assert_eq!((l[1].color.as_deref(), l[1].picture_url.as_deref()), (None, None));
     }
 
     #[test]

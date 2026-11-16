@@ -175,7 +175,7 @@
             {#each wearing as w (w.id + ":" + w.variant)}
               <li>
                 <span class="mini">{#if w.pictureUrl}<img src={w.pictureUrl} alt="" />{:else}<Icon name="market" size={16} />{/if}</span>
-                <span class="nm">{w.name}</span>
+                <span class="nm">{w.name}{#if w.variantName}<small> · {w.variantName}</small>{/if}</span>
                 {#if isBundle(w)}
                   <span class="kind">Body</span>
                 {:else}
@@ -250,6 +250,9 @@
                   <span class="pic">
                     {#if item.pictureUrl}<img src={item.pictureUrl} alt="" loading="lazy" />{:else}<Icon name="market" size={26} />{/if}
                     {#if on}<span class="tick"><Icon name="check" size={14} /></span>{/if}
+                    {#if item.variantName}
+                      <span class="variant"><span class="dot" style:background={item.variantColor ?? "transparent"}></span>{item.variantName}</span>
+                    {/if}
                   </span>
                   <span class="nm">{item.name}</span>
                 </button>
@@ -554,6 +557,32 @@
     border-radius: 50%;
     background: var(--frost);
     color: var(--frost-ink);
+  }
+  .variant {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: calc(100% - 12px);
+    padding: 2px 8px 2px 5px;
+    border-radius: var(--r-full);
+    background: rgba(0, 0, 0, 0.6);
+    color: var(--text-1);
+    font-size: 0.6875rem;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+  }
+  .nm small {
+    color: var(--text-2);
   }
   .item .nm {
     font-size: var(--fs-sm);

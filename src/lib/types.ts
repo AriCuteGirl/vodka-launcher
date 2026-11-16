@@ -536,6 +536,9 @@ export interface LuduvoOwned {
   /** Every slot it takes: a bundle covers up to six body parts, anything else one. */
   slots: string[];
   pictureUrl: string | null;
+  /** For a colour variant: its name ("Blue") and colour ("#AABBCC"). */
+  variantName: string | null;
+  variantColor: string | null;
 }
 
 export interface LuduvoAvatar {
