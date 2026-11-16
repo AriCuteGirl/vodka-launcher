@@ -504,7 +504,7 @@ export interface LuduvoItem {
   name: string;
   description: string;
   creator: string;
-  /** C$; null when it isn't for sale. */
+  /** In Lunes; null when it isn't for sale. */
   price: number | null;
   limited: boolean;
   assetType: string;
@@ -533,6 +533,8 @@ export interface LuduvoOwned {
   name: string;
   assetType: string;
   slot: string;
+  /** Every slot it takes: a bundle covers up to six body parts, anything else one. */
+  slots: string[];
   pictureUrl: string | null;
 }
 

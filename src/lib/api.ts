@@ -140,7 +140,8 @@ export const api = {
   luduvoUserGroups: (userId: number) => call<LuduvoGroup[]>("luduvo_user_groups", { userId }),
   luduvoAvatar: () => call<LuduvoAvatar>("luduvo_avatar"),
   /** Wears exactly these [item id, variant] pairs. */
-  luduvoSetWearing: (items: [number, number][]) => call<LuduvoAvatar>("luduvo_set_wearing", { items }),
+  luduvoSetWearing: (items: Pick<LuduvoOwned, "id" | "variant" | "assetType" | "slots">[]) =>
+    call<LuduvoAvatar>("luduvo_set_wearing", { items: items.map(({ id, variant, assetType, slots }) => ({ id, variant, assetType, slots })) }),
   luduvoInventory: (assetType: string, slot: string, offset: number) => call<LuduvoOwned[]>("luduvo_inventory", { assetType, slot, offset }),
   luduvoOutfits: () => call<LuduvoOutfit[]>("luduvo_outfits"),
   luduvoWearOutfit: (outfitId: number) => call<LuduvoAvatar>("luduvo_wear_outfit", { outfitId }),
@@ -152,7 +153,6 @@ export const api = {
   luduvoFriendRequests: () => call<LuduvoFriend[]>("luduvo_friend_requests"),
   luduvoAnswerRequest: (userId: number, accept: boolean) => call<void>("luduvo_answer_request", { userId, accept }),
   luduvoBalance: () => call<number | null>("luduvo_balance"),
-  luduvoClaimDaily: () => call<Record<string, unknown> | null>("luduvo_claim_daily"),
   luduvoRunning: () => call<LuduvoRunning | null>("luduvo_running"),
   luduvoStop: () => call<void>("luduvo_stop"),
   onLuduvoChanged: (h: () => void) => on<null>("luduvo://changed", h),

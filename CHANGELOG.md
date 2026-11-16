@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+- Luduvo Avatar: bodies (bundles) can be worn again: they're saved the way Luduvo wants, apart from clothes and accessories. A shirt, pants or face replaces the one in the same slot; you always keep a body on.
+- Luduvo Avatar: outfits are big picture cards you click to wear, with "Save current look"; a new outfit's picture appears once Luduvo has drawn it.
+- Luduvo: the balance is shown in Lunes and clicking it opens luduvo.com/store to buy more (Luduvo has no daily reward). It now refreshes by itself: every 30 seconds, when you come back to Vodka, and after a purchase.
 - Friend pop-ups: when a Roblox or Luduvo friend comes online or starts a game, a small card at the top right says so, with Join and Profile. Both kinds can be turned off in Settings → Notifications.
 - Luduvo: while Luduvo updates itself or downloads game content before a game, the banner shows what it's doing with a progress bar instead of nothing.
 - Roblox profiles: click a friend (or Your profile in the account menu) to see their status with Join, friends, followers, about, their friends, games they made, favorites and groups.
-- Luduvo: Marketplace (search, categories, sort, like, favorite, buy after confirming the C$ price), a Friends page (add by username, requests, join, remove), an Avatar page (what you wear, your items, outfits) and profiles.
+- Luduvo: Marketplace (search, categories, sort, like, favorite, buy after confirming the price in Lunes), a Friends page (add by username, requests, join, remove), an Avatar page (what you wear, your items, outfits) and profiles.
 - Luduvo friends in a game get a Join button.
 - Windows: each game is matched to its own Roblox window, so closing a window removes only that game, Close closes the right one, and memory use shows.
 - Windows: Performance settings: FPS, a new Graphics API choice (Direct3D 11, Vulkan, OpenGL), FastFlags, and a memory safety limit. Vodka writes them into Roblox's ClientAppSettings.json and keeps flags it didn't write.

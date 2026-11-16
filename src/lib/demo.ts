@@ -47,10 +47,14 @@ const demoItem = (id: number, name: string, price: number | null, slot: string, 
   id, name, description: "", creator: "Luduvo", price, limited: false, assetType, slot, pictureUrl: null,
   sales: id * 7, likes: id, dislikes: 2, owners: null, myVote: 0, expiresAt: null,
 });
-const owned = (id: number, name: string, assetType: string, slot: string): LuduvoOwned => ({ id, variant: 0, name, assetType, slot, pictureUrl: null });
+const owned = (id: number, name: string, assetType: string, slot: string): LuduvoOwned => ({
+  id, variant: 0, name, assetType, slot, pictureUrl: null,
+  slots: assetType === "avatar_bundle" ? ["head", "torso", "left_arm", "right_arm", "left_leg", "right_leg"] : [slot],
+});
 const luduvoOwned: LuduvoOwned[] = [
   owned(1, "Winter Beanie", "accessory", "hat"), owned(2, "Flag", "accessory", "hat"), owned(3, "Big Grin", "accessory", "face"),
-  owned(4, "Puffer Jacket", "shirt", ""), owned(5, "Cargo Pants", "pants", ""), owned(17, "Classic Body", "bundle", ""),
+  owned(4, "Puffer Jacket", "flat_shirt", "shirt"), owned(5, "Cargo Pants", "flat_pant", "pants"), owned(17, "Classic Body", "avatar_bundle", "head"),
+  owned(18, "Robot Body", "avatar_bundle", "head"),
 ];
 let luduvoWearing: LuduvoOwned[] = [luduvoOwned[0], luduvoOwned[2], luduvoOwned[5]];
 let luduvoOutfits = [{ id: 40, name: "Winter", pictureUrl: null as string | null }];
@@ -61,7 +65,6 @@ const DEMO_ITEMS: LuduvoItem[] = [
 let demoGroup = { id: 4372130, name: "Gamer Robot Inc", members: 19707257, verified: true, publicEntry: true, myRole: null as string | null };
 let demoVipServers = [{ id: 77, name: "Farm room", active: true, expires: "2026-12-14T00:00:00Z", willRenew: true, price: 100, friendsAllowed: false }];
 let luduvoVote = { likes: 4, dislikes: 0, vote: 0 };
-let luduvoClaimed = false;
 let luduvoUser: LuduvoUser | null = scenario() === "signedout" ? null : { id: 9001, name: "puppygirl", displayName: "Puppy Girl", balance: 40 };
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const signedOut = ["onboarding", "signedout"].includes(scenario());
@@ -705,7 +708,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_buy_item": {
       await wait(500);
       const price = Number(args.agreedPrice);
-      if (price > luduvoCoins) throw { kind: "other", message: "Luduvo: You don't have enough C$." };
+      if (price > luduvoCoins) throw { kind: "other", message: "Luduvo: You don't have enough Lunes." };
       luduvoCoins -= price;
       return luduvoCoins;
     }
@@ -733,7 +736,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return { pictureUrl: null, wearing: luduvoWearing };
     case "luduvo_set_wearing":
       await wait(400);
-      luduvoWearing = (args.items as [number, number][]).map(([id]) => luduvoOwned.find((o) => o.id === id)).filter((o): o is LuduvoOwned => !!o);
+      luduvoWearing = (args.items as { id: number }[]).map(({ id }) => luduvoOwned.find((o) => o.id === id)).filter((o): o is LuduvoOwned => !!o);
       return { pictureUrl: null, wearing: luduvoWearing };
     case "luduvo_inventory":
       await wait(250);
@@ -773,12 +776,6 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       return luduvoRunning;
     case "luduvo_balance":
       return luduvoCoins;
-    case "luduvo_claim_daily":
-      await wait(400);
-      if (luduvoClaimed) throw { kind: "other", message: "Luduvo: You already claimed today's reward." };
-      luduvoClaimed = true;
-      luduvoCoins += 10;
-      return { amount: 10, balance: luduvoCoins };
     case "luduvo_running":
       return luduvoRunning;
     case "luduvo_stop":

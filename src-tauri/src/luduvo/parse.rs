@@ -197,17 +197,29 @@ pub fn private_code(pasted: &str) -> Option<String> {
     ((4..=128).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')).then(|| code.to_owned())
 }
 
-/// A small headshot from `headshot_key` (`headshots/<user>/<hash>.png`) on Luduvo's asset host.
-fn headshot(v: &Value) -> Option<String> {
+/// A headshot from `headshot_key` (a path on Luduvo's asset host, e.g. `headshots/<user>/<hash>.png`), at `size`
+/// pixels when Luduvo keeps sized copies.
+fn headshot_sized(v: &Value, size: u32) -> Option<String> {
     let key = v.get("headshot_key")?.as_str()?;
-    let safe = key.starts_with("headshots/") && key.ends_with(".png") && !key.contains("..") && key.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b));
+    let key = key.strip_prefix("https://assets.luduvo.com/").unwrap_or(key).trim_start_matches('/');
+    let safe = !key.is_empty() && !key.contains("..") && key.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b));
     if !safe {
         return None;
     }
     let sized = v.get("headshot_has_variants").and_then(Value::as_bool).unwrap_or(false);
-    let path = if sized { format!("{}/96.png", &key[..key.len() - 4]) } else { key.to_owned() };
+    let path = match key.strip_suffix(".png") {
+        Some(stem) if sized => format!("{stem}/{size}.png"),
+        _ => key.to_owned(),
+    };
     asset_url(Some(&Value::String(format!("https://assets.luduvo.com/{path}"))))
 }
+
+fn headshot(v: &Value) -> Option<String> {
+    headshot_sized(v, 96)
+}
+
+/// The six body parts a bundle can cover.
+pub const BODY_PARTS: [&str; 6] = ["head", "torso", "left_arm", "right_arm", "left_leg", "right_leg"];
 
 pub fn servers(v: &Value) -> Vec<Server> {
     let list = v.as_array().or_else(|| v.get("servers").and_then(Value::as_array));
@@ -315,6 +327,8 @@ pub struct OwnedItem {
     pub name: String,
     pub asset_type: String,
     pub slot: String,
+    /// Every slot it takes: a bundle covers up to six body parts, anything else one.
+    pub slots: Vec<String>,
     pub picture_url: Option<String>,
 }
 
@@ -329,17 +343,38 @@ pub fn owned_item(v: &Value) -> Option<OwnedItem> {
     };
     // Inventory entries call it `item_name`; profile and store entries `name`.
     let name = Some(pick("name")).filter(|n| !n.is_empty()).unwrap_or_else(|| pick("item_name"));
+    let asset_type = pick("asset_type");
+    let listed: Vec<String> = v.get("slots").and_then(Value::as_array).map(|s| s.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
+    let one = pick("slot");
+    let slot = if one.is_empty() { listed.first().cloned().unwrap_or_default() } else { one };
+    let slots = if !listed.is_empty() {
+        listed
+    } else if asset_type == "avatar_bundle" {
+        BODY_PARTS.iter().map(|p| (*p).to_owned()).collect()
+    } else {
+        match asset_type.as_str() {
+            "face" => vec!["face_decal".to_owned()],
+            "flat_shirt" => vec!["shirt".to_owned()],
+            "flat_pant" => vec!["pants".to_owned()],
+            _ if !slot.is_empty() => vec![slot.clone()],
+            _ => vec![],
+        }
+    };
+    // A variant you own may have its own picture.
+    let variant_picture = inner
+        .get("variant")
+        .and_then(|x| x.get("thumbnail_key"))
+        .and_then(Value::as_str)
+        .filter(|k| !k.contains("..") && k.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b)))
+        .and_then(|k| asset_url(Some(&Value::String(format!("https://assets.luduvo.com/{}", k.trim_start_matches('/'))))));
     Some(OwnedItem {
         id,
         variant: v.get("variant_index").and_then(Value::as_u64).unwrap_or(0),
         name: if name.is_empty() { format!("Item {id}") } else { name },
-        asset_type: pick("asset_type"),
-        // Profile entries list `slots` (a body covers six); the first one names it.
-        slot: {
-            let one = pick("slot");
-            if one.is_empty() { v.get("slots").and_then(Value::as_array).and_then(|s| s.first()).and_then(Value::as_str).unwrap_or_default().to_owned() } else { one }
-        },
-        picture_url: asset_url(inner.get("thumbnail_url")).or_else(|| asset_url(v.get("thumbnail_url"))),
+        asset_type,
+        slot,
+        slots,
+        picture_url: variant_picture.or_else(|| asset_url(inner.get("thumbnail_url"))).or_else(|| asset_url(v.get("thumbnail_url"))),
     })
 }
 
@@ -363,7 +398,7 @@ pub fn outfits(v: &Value) -> Vec<Outfit> {
         .and_then(Value::as_array)
         .map(|l| {
             l.iter()
-                .filter_map(|o| Some(Outfit { id: o.get("id")?.as_u64()?, name: text(o, "name"), picture_url: headshot(o) }))
+                .filter_map(|o| Some(Outfit { id: o.get("id")?.as_u64()?, name: text(o, "name"), picture_url: headshot_sized(o, 240) }))
                 .collect()
         })
         .unwrap_or_default()
@@ -784,6 +819,12 @@ mod tests {
         assert_eq!((inv[0].id, inv[0].name.as_str()), (486, "Spark Cap"));
         let o = outfits(&json!({ "outfits": [{ "id": 3, "name": "Winter", "headshot_key": "headshots/1/ab.png", "headshot_has_variants": false }] }));
         assert_eq!((o[0].id, o[0].name.as_str(), o[0].picture_url.as_deref()), (3, "Winter", Some("https://assets.luduvo.com/headshots/1/ab.png")));
+        let o = outfits(&json!({ "outfits": [
+            { "id": 4, "name": "Sized", "headshot_key": "outfits/1/cd.png", "headshot_has_variants": true },
+            { "id": 5, "name": "None yet", "headshot_key": null }
+        ] }));
+        assert_eq!(o[0].picture_url.as_deref(), Some("https://assets.luduvo.com/outfits/1/cd/240.png"));
+        assert_eq!(o[1].picture_url, None);
     }
 
     #[test]
@@ -837,6 +878,20 @@ mod tests {
         let u = user(&json!({ "id": 12, "username": "puppy", "display_name": null, "balance": 40 })).unwrap();
         assert_eq!((u.id, u.name.as_str(), u.display_name.as_str(), u.balance), (12, "puppy", "puppy", Some(40)));
         assert!(user(&json!({ "username": "x" })).is_none());
+    }
+
+    #[test]
+    fn bundles_and_clothes_know_their_slots() {
+        let l = owned_list(&json!({ "items": [
+            { "item_id": 1, "item_name": "Robot", "asset_type": "avatar_bundle" },
+            { "item_id": 2, "item_name": "Tee", "asset_type": "flat_shirt" },
+            { "item_id": 3, "item_name": "Cap", "asset_type": "accessory", "slot": "hat" },
+            { "item_id": 4, "name": "Legs", "asset_type": "avatar_bundle", "slots": ["left_leg", "right_leg"] }
+        ] }));
+        assert_eq!(l[0].slots.len(), 6);
+        assert_eq!(l[1].slots, vec!["shirt"]);
+        assert_eq!(l[2].slots, vec!["hat"]);
+        assert_eq!(l[3].slots, vec!["left_leg", "right_leg"]);
     }
 
     #[test]

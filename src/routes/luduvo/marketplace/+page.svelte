@@ -6,7 +6,7 @@
   import Skeleton from "$lib/components/Skeleton.svelte";
   import StateCard from "$lib/components/StateCard.svelte";
   import { compact } from "$lib/format";
-  import { luduvo, luduvoSignIn, startLuduvo } from "$lib/luduvo.svelte";
+  import { buyLunes, loadBalance, luduvo, luduvoSignIn, startLuduvo } from "$lib/luduvo.svelte";
   import { toast } from "$lib/state.svelte";
   import { toAppError, type AppError, type LuduvoCategory, type LuduvoItem } from "$lib/types";
   import { onMount } from "svelte";
@@ -99,7 +99,8 @@
     try {
       const balance = await api.luduvoBuyItem(open.id, open.price);
       if (balance != null) luduvo.coins = balance;
-      toast(`You bought ${open.name}${open.price ? ` for ${open.price} C$` : ""}. It's in your inventory.`, "ok", 7000);
+      void loadBalance(true);
+      toast(`You bought ${open.name}${open.price ? ` for ${open.price} Lunes` : ""}. It's in your inventory.`, "ok", 7000);
       confirming = false;
     } catch (e) {
       toast(toAppError(e).message, "danger", 9000);
@@ -107,13 +108,13 @@
     buying = false;
   }
   const short = $derived(open && open.price != null && luduvo.coins != null && open.price > luduvo.coins);
-  const priceText = (p: number | null) => (p == null ? "Off sale" : p === 0 ? "Free" : `${p.toLocaleString()} C$`);
+  const priceText = (p: number | null) => (p == null ? "Off sale" : p === 0 ? "Free" : `${p.toLocaleString()} Lunes`);
 </script>
 
 <div class="market">
   <header>
     <h1>Marketplace</h1>
-    {#if luduvo.coins != null}<span class="coins"><b>C$</b> {luduvo.coins.toLocaleString()}</span>{/if}
+    {#if luduvo.coins != null}<button class="coins" onclick={buyLunes} title="Buy more Lunes on luduvo.com">{luduvo.coins.toLocaleString()} <b>Lunes</b></button>{/if}
   </header>
 
   <div class="bar">
@@ -196,8 +197,8 @@
     {#if confirming && item.price != null}
       <div class="confirm" role="alert">
         <b>Buy {item.name} for {priceText(item.price)}?</b>
-        {#if luduvo.coins != null}<span>You have {luduvo.coins.toLocaleString()} C${item.price ? `, ${Math.max(0, luduvo.coins - item.price).toLocaleString()} C$ after.` : "."}</span>{/if}
-        {#if short}<span class="err">You don't have enough C$ for this.</span>{/if}
+        {#if luduvo.coins != null}<span>You have {luduvo.coins.toLocaleString()} Lunes{item.price ? `, ${Math.max(0, luduvo.coins - item.price).toLocaleString()} after.` : "."}</span>{/if}
+        {#if short}<span class="err">You don't have enough Lunes for this. <button class="link" onclick={buyLunes}>Buy Lunes</button></span>{/if}
       </div>
     {/if}
     {#snippet actions()}
@@ -207,9 +208,9 @@
       {:else if item.price == null}
         <Button variant="primary" disabled>Off sale</Button>
       {:else if !confirming}
-        <Button variant="primary" onclick={() => (confirming = true)}>{item.price === 0 ? "Get it free" : `Buy for ${item.price} C$`}</Button>
+        <Button variant="primary" onclick={() => (confirming = true)}>{item.price === 0 ? "Get it free" : `Buy for ${item.price} Lunes`}</Button>
       {:else}
-        <Button variant="primary" busy={buying} disabled={!!short} onclick={buy}>{item.price === 0 ? "Yes, get it" : `Yes, pay ${item.price} C$`}</Button>
+        <Button variant="primary" busy={buying} disabled={!!short} onclick={buy}>{item.price === 0 ? "Yes, get it" : `Yes, pay ${item.price} Lunes`}</Button>
       {/if}
     {/snippet}
   </Modal>
@@ -229,10 +230,25 @@
   }
   .coins {
     padding: 4px 12px;
+    border: 1px solid transparent;
     border-radius: var(--r-full);
     background: var(--glass-strong);
+    color: var(--text-0);
+    cursor: pointer;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+  }
+  .coins:hover {
+    border-color: var(--frost);
+  }
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--frost);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
   }
   .coins b {
     color: var(--frost);

@@ -1335,7 +1335,7 @@ async fn luduvo_avatar(state: State<'_, AppState>) -> Result<LuduvoAvatar> {
 }
 
 #[tauri::command]
-async fn luduvo_set_wearing(state: State<'_, AppState>, items: Vec<(u64, u64)>) -> Result<LuduvoAvatar> {
+async fn luduvo_set_wearing(state: State<'_, AppState>, items: Vec<luduvo::WearItem>) -> Result<LuduvoAvatar> {
     state.luduvo.set_equipped(&items).await?;
     let me = state.luduvo.me().await?;
     // The picture is redrawn by Luduvo after a change; ask for it after a short pause.
@@ -1420,11 +1420,6 @@ async fn luduvo_answer_request(state: State<'_, AppState>, user_id: u64, accept:
 #[tauri::command]
 async fn luduvo_balance(state: State<'_, AppState>) -> Result<Option<i64>> {
     state.luduvo.balance().await
-}
-
-#[tauri::command]
-async fn luduvo_claim_daily(state: State<'_, AppState>) -> Result<serde_json::Value> {
-    state.luduvo.claim_daily().await
 }
 
 #[tauri::command]
@@ -1571,7 +1566,6 @@ pub fn run() {
             luduvo_friend_requests,
             luduvo_answer_request,
             luduvo_balance,
-            luduvo_claim_daily,
             luduvo_stop,
             luduvo_open_studio
         ])

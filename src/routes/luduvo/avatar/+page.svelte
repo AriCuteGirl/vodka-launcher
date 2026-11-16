@@ -20,6 +20,23 @@
   let saving = $state(false);
   let outfitName = $state("");
   let pictureFailed = $state(false);
+  let naming = $state(false);
+  /** The outfit put on last, until something else changes. */
+  let wornOutfit = $state<number | null>(null);
+  let brokenPictures = $state(new Set<number>());
+
+  /** Luduvo draws a new outfit's picture a few seconds after it's saved; look again until it's there. */
+  async function waitForPictures() {
+    for (const ms of [1500, 3000, 5000]) {
+      await new Promise((r) => setTimeout(r, ms));
+      try {
+        outfits = await api.luduvoOutfits();
+      } catch {
+        return;
+      }
+      if (outfits.every((o) => o.pictureUrl)) return;
+    }
+  }
 
   async function loadAvatar() {
     try {
@@ -50,13 +67,17 @@
   });
 
   const wearing = $derived(avatar.status === "ready" ? avatar.data.wearing : []);
-  const isWorn = (item: LuduvoOwned) => wearing.some((w) => w.id === item.id && w.variant === item.variant);
+  const isBundle = (i: LuduvoOwned) => i.assetType === "avatar_bundle";
+  // A body (bundle) is worn whatever its variant; everything else by item and variant.
+  const isWorn = (item: LuduvoOwned) => wearing.some((w) => w.id === item.id && (isBundle(item) || w.variant === item.variant));
+  const MAX_ACCESSORIES = 20;
 
   async function apply(next: LuduvoOwned[], done: string) {
     saving = true;
     try {
-      avatar = { status: "ready", data: await api.luduvoSetWearing(next.map((i) => [i.id, i.variant] as [number, number])) };
+      avatar = { status: "ready", data: await api.luduvoSetWearing(next) };
       pictureFailed = false;
+      wornOutfit = null;
       toast(done, "ok");
     } catch (e) {
       toast(toAppError(e).message, "danger");
@@ -66,18 +87,30 @@
   function toggle(item: LuduvoOwned) {
     if (saving) return;
     if (isWorn(item)) {
+      // Luduvo always needs a body on; swap it for another one instead.
+      if (isBundle(item)) return toast("You always wear a body. Pick another one to swap it.", "info");
       void apply(wearing.filter((w) => !(w.id === item.id && w.variant === item.variant)), `Took off ${item.name}.`);
+      return;
+    }
+    if (isBundle(item)) {
+      // A new body replaces every body part.
+      void apply([...wearing.filter((w) => !isBundle(w)), item], `Wearing ${item.name}.`);
+    } else if (item.assetType === "accessory") {
+      if (wearing.filter((w) => w.assetType === "accessory").length >= MAX_ACCESSORIES) return toast(`You can wear up to ${MAX_ACCESSORIES} accessories.`, "danger");
+      void apply([...wearing.filter((w) => w.id !== item.id), item], `Wearing ${item.name}.`);
     } else {
-      // Clothing and bodies replace the one already worn of the same kind; accessories add up (Luduvo enforces its own limits).
-      const single = item.assetType !== "accessory";
-      const keep = wearing.filter((w) => !(single && w.assetType === item.assetType) && w.id !== item.id);
-      void apply([...keep, item], `Wearing ${item.name}.`);
+      // A shirt, pants or face replaces whatever is in the same slot.
+      const slot = item.slots[0] ?? item.slot;
+      void apply([...wearing.filter((w) => isBundle(w) || !(w.slots.includes(slot) || w.assetType === item.assetType)), item], `Wearing ${item.name}.`);
     }
   }
   async function wearOutfit(o: LuduvoOutfit) {
+    if (saving) return;
     saving = true;
     try {
       avatar = { status: "ready", data: await api.luduvoWearOutfit(o.id) };
+      pictureFailed = false;
+      wornOutfit = o.id;
       toast(`Wearing ${o.name}.`, "ok");
     } catch (e) {
       toast(toAppError(e).message, "danger");
@@ -91,6 +124,8 @@
       outfits = await api.luduvoSaveOutfit(outfitName.trim());
       toast(`Saved ${outfitName.trim()}.`, "ok");
       outfitName = "";
+      naming = false;
+      void waitForPictures();
     } catch (err) {
       toast(toAppError(err).message, "danger");
     }
@@ -141,33 +176,56 @@
               <li>
                 <span class="mini">{#if w.pictureUrl}<img src={w.pictureUrl} alt="" />{:else}<Icon name="market" size={16} />{/if}</span>
                 <span class="nm">{w.name}</span>
-                <button onclick={() => toggle(w)} disabled={saving} aria-label="Take off {w.name}" title="Take off"><Icon name="close" size={14} /></button>
+                {#if isBundle(w)}
+                  <span class="kind">Body</span>
+                {:else}
+                  <button onclick={() => toggle(w)} disabled={saving} aria-label="Take off {w.name}" title="Take off"><Icon name="close" size={14} /></button>
+                {/if}
               </li>
             {/each}
           </ul>
         {/if}
 
-        <h2>Outfits <span class="count">{outfits.length}</span></h2>
-        {#if outfits.length}
-          <ul class="outfits">
-            {#each outfits as o (o.id)}
-              <li>
-                <button class="wear" disabled={saving} onclick={() => wearOutfit(o)} title="Wear {o.name}">
-                  {#if o.pictureUrl}<img src={o.pictureUrl} alt="" />{:else}<Icon name="avatar" size={18} />{/if}
-                  <span>{o.name}</span>
-                </button>
-                <button class="del" onclick={() => deleteOutfit(o)} aria-label="Delete {o.name}" title="Delete"><Icon name="close" size={13} /></button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-        <form class="save" onsubmit={saveOutfit}>
-          <input bind:value={outfitName} placeholder="Save this look as…" maxlength="50" spellcheck="false" autocomplete="off" aria-label="Outfit name" />
-          <Button type="submit" size="sm" disabled={!outfitName.trim()}>Save</Button>
-        </form>
       </aside>
 
       <section class="items">
+        <div class="outfit-head">
+          <h2>Outfits <span class="count">{outfits.length}</span></h2>
+          {#if naming}
+            <form class="save" onsubmit={saveOutfit}>
+              <!-- svelte-ignore a11y_autofocus -->
+              <input bind:value={outfitName} placeholder="Name this look" maxlength="50" spellcheck="false" autocomplete="off" aria-label="Outfit name" autofocus />
+              <Button type="submit" size="sm" variant="primary" disabled={!outfitName.trim()}>Save</Button>
+              <Button size="sm" onclick={() => ((naming = false), (outfitName = ""))}>Cancel</Button>
+            </form>
+          {:else}
+            <Button size="sm" icon="plus" onclick={() => (naming = true)}>Save current look</Button>
+          {/if}
+        </div>
+        {#if outfits.length === 0}
+          <p class="faint">No outfits yet. Put a look together, then save it here to switch back to it in one click.</p>
+        {:else}
+          <ul class="outfits">
+            {#each outfits as o (o.id)}
+              <li class:on={wornOutfit === o.id}>
+                <button class="card" disabled={saving} onclick={() => wearOutfit(o)} title="Wear {o.name}">
+                  <span class="shot">
+                    {#if o.pictureUrl && !brokenPictures.has(o.id)}
+                      <img src={o.pictureUrl} alt="" loading="lazy" onerror={() => (brokenPictures = new Set([...brokenPictures, o.id]))} />
+                    {:else}
+                      <Icon name="avatar" size={40} />
+                    {/if}
+                    {#if wornOutfit === o.id}<span class="tick"><Icon name="check" size={14} /></span>{/if}
+                  </span>
+                  <span class="nm">{o.name}</span>
+                </button>
+                <button class="del" onclick={() => deleteOutfit(o)} aria-label="Delete {o.name}" title="Delete {o.name}"><Icon name="close" size={13} /></button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        <h2>Your items</h2>
         <div class="chips" role="radiogroup" aria-label="Kind of item">
           <button role="radio" aria-checked={tab == null} class:on={tab == null} onclick={() => (tab = null)}>All</button>
           {#each categories as c (c.assetType + c.slot)}
@@ -268,8 +326,7 @@
     color: var(--text-2);
     letter-spacing: 0;
   }
-  .worn,
-  .outfits {
+  .worn {
     display: grid;
     gap: 4px;
     margin: 0;
@@ -307,6 +364,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .kind {
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    padding-right: 4px;
+  }
   .worn button,
   .del {
     display: grid;
@@ -324,46 +386,86 @@
     color: var(--danger);
     background: var(--glass-hover);
   }
-  .outfits li {
+  .outfit-head {
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: space-between;
+    gap: var(--s-3);
+    flex-wrap: wrap;
   }
-  .wear {
-    flex: 1;
+  .outfits {
     display: flex;
-    align-items: center;
-    gap: var(--s-2);
-    min-width: 0;
-    padding: 4px 6px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
-    background: var(--glass);
-    color: var(--text-0);
-    font-size: var(--fs-sm);
+    gap: var(--s-3);
+    margin: 0;
+    padding: 0 0 var(--s-2);
+    list-style: none;
+    overflow-x: auto;
+  }
+  .outfits li {
+    position: relative;
+    flex: none;
+    width: 128px;
+  }
+  .card {
+    display: grid;
+    gap: 6px;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
     text-align: left;
     cursor: pointer;
   }
-  .wear:hover {
-    border-color: var(--frost);
+  .card:disabled {
+    cursor: wait;
   }
-  .wear img {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-  }
-  .wear span {
+  .shot {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 160px;
+    border-radius: var(--r-lg);
+    border: 1px solid var(--line);
+    background: radial-gradient(circle at 50% 40%, var(--glass-strong), var(--glass));
+    color: var(--text-2);
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    transition: border-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+  }
+  .card:hover .shot {
+    border-color: var(--frost);
+    transform: translateY(-2px);
+  }
+  .on .shot {
+    border: 2px solid var(--frost);
+  }
+  .shot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .card .nm {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .outfits .del {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    transition: opacity var(--fast) var(--ease);
+  }
+  .outfits li:hover .del,
+  .outfits .del:focus-visible {
+    opacity: 1;
   }
   .save {
     display: flex;
     gap: var(--s-2);
   }
   .save input {
-    flex: 1;
-    min-width: 0;
+    width: 200px;
     height: 32px;
     padding: 0 var(--s-3);
     border-radius: var(--r-sm);

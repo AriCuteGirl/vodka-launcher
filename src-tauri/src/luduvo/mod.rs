@@ -575,10 +575,20 @@ impl Client {
         Ok(parse::owned_list(&json))
     }
 
-    /// Wears exactly `items` (item id and variant), replacing what you had on.
-    pub async fn set_equipped(&self, items: &[(u64, u64)]) -> Result<()> {
-        let list: Vec<serde_json::Value> = items.iter().map(|(id, variant)| serde_json::json!({ "item_id": id, "variant_index": variant })).collect();
-        self.authed_with(Method::PUT, "/me/equipped", Some(&serde_json::json!({ "items": list }))).await?;
+    /// Wears exactly `items`, replacing what you had on. Luduvo keeps bundles (body parts) apart from everything
+    /// else: bundles go to `/me/bundle`, the rest to `/me/equipped`, and each is only sent when it changed.
+    pub async fn set_equipped(&self, items: &[WearItem]) -> Result<()> {
+        let now = self.equipped().await?;
+        let (bundles, rest): (Vec<&WearItem>, Vec<&WearItem>) = items.iter().partition(|i| i.asset_type == "avatar_bundle");
+        let was_bundles: Vec<WearItem> = now.iter().filter(|i| i.asset_type == "avatar_bundle").map(WearItem::from).collect();
+        let was_rest: Vec<WearItem> = now.iter().filter(|i| i.asset_type != "avatar_bundle").map(WearItem::from).collect();
+        if let Some(body) = bundle_body(&bundles).filter(|_| !same_items(&bundles, &was_bundles)) {
+            self.authed_with(Method::PUT, "/me/bundle", Some(&body)).await?;
+        }
+        if !same_items(&rest, &was_rest) {
+            let list: Vec<serde_json::Value> = rest.iter().map(|i| serde_json::json!({ "item_id": i.id, "variant_index": i.variant })).collect();
+            self.authed_with(Method::PUT, "/me/equipped", Some(&serde_json::json!({ "items": list }))).await?;
+        }
         Ok(())
     }
 
@@ -714,14 +724,6 @@ impl Client {
         #[cfg(debug_assertions)]
         eprintln!("[luduvo] balance shape: {}", parse::shape(&json));
         Ok(parse::balance(&json))
-    }
-
-    /// Claims today's reward. Returns Luduvo's answer for the UI to describe.
-    pub async fn claim_daily(&self) -> Result<serde_json::Value> {
-        let json = self.authed(Method::POST, "/me/rewards/daily").await?;
-        #[cfg(debug_assertions)]
-        eprintln!("[luduvo] daily reward shape: {}", parse::shape(&json));
-        Ok(json)
     }
 
     pub async fn sign_out(&self) -> Result<()> {
@@ -953,5 +955,91 @@ mod tests {
         assert!(e.to_string().contains("too quickly"));
         let e = explain(StatusCode::BAD_REQUEST, "<html>nope</html>");
         assert!(e.to_string().contains("HTTP 400"));
+    }
+}
+
+/// One thing to wear, as the Avatar page sends it.
+#[derive(Debug, Clone, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WearItem {
+    pub id: u64,
+    #[serde(default)]
+    pub variant: u64,
+    #[serde(default)]
+    pub asset_type: String,
+    #[serde(default)]
+    pub slots: Vec<String>,
+}
+
+impl From<&OwnedItem> for WearItem {
+    fn from(i: &OwnedItem) -> Self {
+        WearItem { id: i.id, variant: i.variant, asset_type: i.asset_type.clone(), slots: i.slots.clone() }
+    }
+}
+
+fn same_items<A: std::borrow::Borrow<WearItem>, B: std::borrow::Borrow<WearItem>>(a: &[A], b: &[B]) -> bool {
+    let key = |i: &WearItem| {
+        let mut s = i.slots.clone();
+        s.sort();
+        (i.id, i.variant, s)
+    };
+    let mut x: Vec<_> = a.iter().map(|i| key(i.borrow())).collect();
+    let mut y: Vec<_> = b.iter().map(|i| key(i.borrow())).collect();
+    x.sort();
+    y.sort();
+    x == y
+}
+
+/// What `/me/bundle` takes: `{"item_id": n}` for one bundle on the whole body, or `{"parts": {"head": n, ...}}` when
+/// parts come from different bundles. None when no bundle is worn (Luduvo needs one, so nothing is sent).
+fn bundle_body(bundles: &[&WearItem]) -> Option<serde_json::Value> {
+    if bundles.is_empty() {
+        return None;
+    }
+    if let [one] = bundles
+        && (one.slots.is_empty() || parse::BODY_PARTS.iter().all(|p| one.slots.iter().any(|s| s == p)))
+    {
+        return Some(serde_json::json!({ "item_id": one.id }));
+    }
+    let mut parts = serde_json::Map::new();
+    for part in parse::BODY_PARTS {
+        if let Some(b) = bundles.iter().find(|b| b.slots.iter().any(|s| s == part)) {
+            parts.insert(part.to_owned(), b.id.into());
+        }
+    }
+    Some(serde_json::json!({ "parts": parts }))
+}
+
+#[cfg(test)]
+mod wear_tests {
+    use super::*;
+
+    fn item(id: u64, kind: &str, slots: &[&str]) -> WearItem {
+        WearItem { id, variant: 0, asset_type: kind.into(), slots: slots.iter().map(|s| (*s).to_owned()).collect() }
+    }
+
+    #[test]
+    fn one_whole_bundle_is_sent_by_id() {
+        let b = item(7, "avatar_bundle", &parse::BODY_PARTS);
+        assert_eq!(bundle_body(&[&b]), Some(serde_json::json!({ "item_id": 7 })));
+    }
+
+    #[test]
+    fn mixed_bundles_are_sent_by_part() {
+        let a = item(7, "avatar_bundle", &["head", "torso", "left_arm", "right_arm"]);
+        let b = item(9, "avatar_bundle", &["left_leg", "right_leg"]);
+        assert_eq!(
+            bundle_body(&[&a, &b]),
+            Some(serde_json::json!({ "parts": { "head": 7, "torso": 7, "left_arm": 7, "right_arm": 7, "left_leg": 9, "right_leg": 9 } }))
+        );
+        assert_eq!(bundle_body(&[]), None);
+    }
+
+    #[test]
+    fn order_does_not_matter_when_comparing() {
+        let a = [item(1, "accessory", &["hat"]), item(2, "flat_shirt", &["shirt"])];
+        let b = [item(2, "flat_shirt", &["shirt"]), item(1, "accessory", &["hat"])];
+        assert!(same_items(&a, &b));
+        assert!(!same_items(&a[..1], &b));
     }
 }
