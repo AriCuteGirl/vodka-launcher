@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+More than one game: a rail on the left switches between Roblox and Luduvo, each with its own pages, account and colour.
+
+- Luduvo: sign in with Luduvo's own Studio sign-in (your browser hands Vodka a one-time ticket; the session lives in the keyring), Home with a "Jump back in" banner and Luduvo's discovery shelves, Continue playing, search, and Play through the official Luduvo launcher. Vodka shows the game you're in and can close it.
+- Luduvo: friends panel with what each friend is playing and Join, friend requests, your C$ balance and the daily reward.
+- Luduvo isn't installed? Vodka shows Luduvo's own install command and warns that the first start downloads its content before any window appears.
+- Game pages for Roblox and Luduvo: clicking a game opens its page (banner, pictures, likes, favorite, about) instead of starting it; the Play pill on a tile still starts it at once.
+- Server browser in a pop-out: join the fewest or busiest server, sort, hide full servers; Luduvo servers show who's in them.
+- Roblox private servers: join friends' servers, turn your own on or off, copy an invite link, let friends join without an invite, and make a new one at the exact price Roblox shows (free ones too). New servers let friends in by default.
+- Luduvo private servers: join with an invite code.
+- Groups: join a game's Roblox group from its page. Roblox's human check runs on its own page in a hidden window, which only shows if Roblox wants a puzzle solved. Luduvo groups join directly.
+- Faster scrolling and hovering on long rows of games; rows off screen aren't drawn.
+- Development: the "Unknown word" error overlay after restarting `pnpm tauri dev` is gone.
+
 ## 0.1.1 (2026-11-14)
 
 - Linux release is now an AppImage: download it, make it executable, run it.
