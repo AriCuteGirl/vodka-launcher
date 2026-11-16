@@ -1,17 +1,12 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { chat } from "$lib/chat.svelte";
-  import Icon, { type IconName } from "./Icon.svelte";
+  import { gameOf } from "$lib/games";
+  import Icon from "./Icon.svelte";
 
-  const items: { href: string; label: string; icon: IconName }[] = [
-    { href: "/", label: "Home", icon: "home" },
-    { href: "/games", label: "Games", icon: "games" },
-    { href: "/players", label: "Players", icon: "players" },
-    { href: "/avatar", label: "Avatar", icon: "avatar" },
-    { href: "/marketplace", label: "Marketplace", icon: "market" },
-    { href: "/friends", label: "Friends", icon: "friends" },
-    { href: "/chat", label: "Chat", icon: "chat" },
-  ];
+  // Each game has its own pages; the rail on the left picks the game.
+  const game = $derived(gameOf(page.url.pathname));
+  const items = $derived(game.pages);
   // Remembered between starts; a wide sidebar shows each page's name next to its icon.
   let open = $state(typeof localStorage !== "undefined" && localStorage.getItem("vodka-sidebar") === "open");
   function toggle() {
@@ -22,10 +17,11 @@
       // It just won't be remembered.
     }
   }
-  const active = (href: string) => (href === "/" ? page.url.pathname === "/" : page.url.pathname.startsWith(href));
+  // A game's home is only active on itself; other pages also cover what is under them.
+  const active = (href: string) => (href === game.home || href === "/" ? page.url.pathname === href : page.url.pathname.startsWith(href));
 </script>
 
-<nav class="sidebar" class:open aria-label="Main">
+<nav class="sidebar" class:open aria-label="{game.name} pages">
   <button class="toggle" onclick={toggle} aria-expanded={open} aria-label={open ? "Collapse the sidebar" : "Expand the sidebar to show page names"}>
     <Icon name="menu" size={19} />
     <span class="text">Menu</span>

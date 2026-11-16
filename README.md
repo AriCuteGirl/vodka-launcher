@@ -1,6 +1,6 @@
 # Vodka Launcher
 
-A Roblox launcher for Linux. Vodka is the front end; [Mocktail](https://github.com/komaruworld/mocktail) is the engine that runs the game.
+A launcher for Roblox and [Luduvo](https://luduvo.com) on Linux. For Roblox, Vodka is the front end and [Mocktail](https://github.com/komaruworld/mocktail) is the engine that runs the game; for Luduvo it drives Luduvo's official launcher. A rail on the left switches between the two.
 
 ![First-run setup](docs/screenshots/onboarding.png)
 
@@ -96,4 +96,4 @@ The browser-only UI accepts `?demo=` to show a state: `loading`, `empty`, `error
 Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Vodka runs Mocktail (Apache-2.0, Mocktail Project Authors) as a separate
 program and does not bundle it or the Roblox client.
 
-Vodka Launcher is an independent project. It is not affiliated with Roblox Corporation, Mocktail, or Lunar Client.
+Vodka Launcher is an independent project. It is not affiliated with Roblox Corporation, Luduvo Corporation, Mocktail, or Lunar Client.

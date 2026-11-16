@@ -52,6 +52,24 @@ Only try it with accounts you're willing to lose. Don't use automation or exploi
 6. Close one game from Vodka's side panel. Does only that window close?
 7. If the second window closes the first one, or won't open, write down exactly what happened.
 
+## Game pages, servers, private servers, groups (new)
+
+1. Click a game's picture (not its Play button). Does a page open with the banner, title, Play, likes, favorite and
+   an About section? Does **Play** on the page start the game?
+2. Press **Servers**. Do the server cards show? Does **Join fewest players** put you in a small server?
+3. Press **Private servers**. Are friends' private servers listed? If you own one, do **Invite only / Friends can
+   join**, the on/off switch and **Invite link** work?
+4. On a game with **free** private servers, press **Create free server**. Does it show up under **Yours**? Can
+   your friends join it? (Only try a paid one if you're happy to spend the Robux; the dialog shows the price first.)
+5. On a game made by a group you're not in, press **Join (group name)**. Does it say you joined, with no window?
+   If a Roblox window pops up, write down what it showed.
+
+## Luduvo (new)
+
+The rail on the far left switches to Luduvo. On Windows you can sign in, browse, see friends and game pages, but
+**Play doesn't start Luduvo yet**: Vodka only knows where the Linux version is installed. Check that browsing and
+sign-in work (sign-in opens luduvo.com in your normal browser), and tell the owner where Luduvo is installed.
+
 ## Not in the Windows version (on purpose)
 
 - No performance settings, per-game stats, Restart or Gather. These need Mocktail, which is Linux-only.

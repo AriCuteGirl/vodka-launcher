@@ -1,6 +1,8 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { gameOf } from "$lib/games";
+  import { claimDaily, luduvo, luduvoSignIn, luduvoSignOut, openStudio } from "$lib/luduvo.svelte";
   import { app, removeAccount, signIn, switchAccount } from "$lib/state.svelte";
   import Avatar from "./Avatar.svelte";
   import Button from "./Button.svelte";
@@ -21,7 +23,12 @@
     chat: "Chat",
     avatar: "Avatar",
   };
-  const crumb = $derived(TITLES[page.url.pathname.split("/")[1] ?? ""] ?? "Home");
+  const game = $derived(gameOf(page.url.pathname));
+  const crumb = $derived.by(() => {
+    const parts = page.url.pathname.split("/").filter(Boolean);
+    if (game.id === "luduvo") return `Luduvo · ${TITLES[parts[1] ?? ""] ?? "Home"}`;
+    return TITLES[parts[0] ?? ""] ?? "Home";
+  });
 
   function onKey(e: KeyboardEvent) {
     if ((e.ctrlKey && e.key === "k") || (e.key === "/" && !(e.target instanceof HTMLInputElement))) {
@@ -45,19 +52,59 @@
   <div class="right">
     <label class="search">
       <Icon name="search" size={15} />
-      <span class="sr-only">Filter your games, or press Enter to search all of Roblox</span>
+      <span class="sr-only">Filter your games, or press Enter to search all of {game.name}</span>
       <input
         bind:this={searchInput}
         bind:value={app.search}
         onkeydown={(e) => {
           // Enter searches all of Roblox; typing alone filters what is on screen.
-          if (e.key === "Enter" && app.search.trim()) void goto(`/games?q=${encodeURIComponent(app.search.trim())}`);
+          if (e.key === "Enter" && app.search.trim()) {
+            const games = game.id === "luduvo" ? "/luduvo/games" : "/games";
+            void goto(`${games}?q=${encodeURIComponent(app.search.trim())}`);
+          }
         }}
         type="search"
-        placeholder="Filter, or Enter to search Roblox" spellcheck="false" autocomplete="off" />
+        placeholder="Filter, or Enter to search {game.name}" spellcheck="false" autocomplete="off" />
       <kbd>Ctrl K</kbd>
     </label>
 
+    {#if game.id === "luduvo"}
+      {#if luduvo.user && luduvo.coins != null}
+        <button class="robux coins" onclick={claimDaily} title="Your Luduvo coins. Click to claim today's daily reward." aria-label="{luduvo.coins.toLocaleString()} C$. Claim the daily reward">
+          <span class="cs">C$</span><span>{luduvo.coins.toLocaleString()}</span>
+        </button>
+      {/if}
+      <div class="account">
+        {#if luduvo.user}
+          {@const user = luduvo.user}
+          <button
+            class="chip"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onclick={(e) => {
+              e.stopPropagation();
+              menuOpen = !menuOpen;
+            }}
+          >
+            <Avatar name={user.displayName} src={null} size={22} />
+            <b>{user.displayName}</b>
+            <Icon name="chevron" size={14} />
+          </button>
+          {#if menuOpen}
+            <div class="menu" role="menu">
+              <p>Luduvo account</p>
+              <div class="solo"><Avatar name={user.displayName} src={null} size={22} /><span class="who">{user.displayName}<small>@{user.name}</small></span></div>
+              <hr />
+              <button role="menuitem" onclick={claimDaily}><Icon name="star" size={16} /> Claim daily reward</button>
+              <button role="menuitem" onclick={openStudio}><Icon name="terminal" size={16} /> Open Luduvo Studio</button>
+              <button role="menuitem" onclick={luduvoSignOut}><Icon name="signOut" size={16} /> Sign out of Luduvo</button>
+            </div>
+          {/if}
+        {:else if luduvo.started}
+          <Button variant="primary" size="sm" busy={luduvo.signingIn} onclick={luduvoSignIn}>Sign in to Luduvo</Button>
+        {/if}
+      </div>
+    {:else}
     {#if app.account && app.robux != null}
       <a class="robux" href="/marketplace" title="Your Robux. Click to open the Marketplace." aria-label="{app.robux.toLocaleString()} Robux">
         <Icon name="robux" size={15} /><span>{app.robux.toLocaleString()}</span>
@@ -100,6 +147,7 @@
         <Button variant="primary" size="sm" busy={app.signingIn} onclick={signIn}>Sign in</Button>
       {/if}
     </div>
+    {/if}
   </div>
 </header>
 
@@ -201,6 +249,16 @@
     color: var(--text-2);
     white-space: nowrap;
   }
+  .coins {
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  .cs {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: var(--frost);
+  }
   .robux {
     display: inline-flex;
     align-items: center;
@@ -265,6 +323,13 @@
     margin: 6px 4px;
     border: 0;
     border-top: 1px solid var(--line);
+  }
+  .solo {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    padding: 4px 10px 6px;
+    font-size: var(--fs-sm);
   }
   .who {
     display: grid;

@@ -314,3 +314,150 @@ export type Loadable<T> =
   | { status: "loading" }
   | { status: "ready"; data: T }
   | { status: "error"; error: AppError };
+
+// ---------------------------------------------------------------------------------------------
+// Luduvo
+
+/** Which game a part of Vodka belongs to. */
+export type GameId = "roblox" | "luduvo";
+
+export interface LuduvoStatus {
+  installed: boolean;
+  /** Luduvo's own build number. */
+  version: string | null;
+  /** False where Vodka can't start Luduvo yet (Windows). */
+  supported: boolean;
+  installCommand: string;
+}
+
+export interface LuduvoUser {
+  id: number;
+  name: string;
+  displayName: string;
+  balance: number | null;
+}
+
+export interface LuduvoPlace {
+  id: number;
+  title: string;
+  creator: string;
+  description: string;
+  iconUrl: string | null;
+  bannerUrl: string | null;
+  playing: number;
+  maxPlayers: number;
+  visits: number;
+  likes: number;
+  dislikes: number;
+  /** Your total time in this game, in seconds; only in recently played. */
+  playtime: number | null;
+}
+
+export interface LuduvoShelf {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  places: LuduvoPlace[];
+}
+
+/** The Luduvo game Vodka started, while it runs. */
+export interface LuduvoRunning {
+  placeId: number;
+  title: string;
+  pid: number;
+  /** Unix seconds. */
+  startedAt: number;
+}
+
+export interface LuduvoFriend {
+  id: number;
+  name: string;
+  displayName: string;
+  avatarUrl: string | null;
+  /** `online`, `in_game` or `offline`. */
+  state: string;
+  placeId: number | null;
+  placeTitle: string | null;
+  /** Luduvo lets you follow them into their server. */
+  joinable: boolean;
+}
+
+/** What a Roblox game's page shows. */
+export interface GameDetails {
+  universeId: number;
+  name: string;
+  /** The place Play starts in. */
+  rootPlaceId: number;
+  creatorId: number | null;
+  /** `Group` or `User`. */
+  creatorType: string | null;
+  iconUrl: string | null;
+  /** All wide pictures, banner first. */
+  gallery: string[];
+  description: string;
+  creator: string;
+  creatorVerified: boolean;
+  playing: number | null;
+  visits: number | null;
+  favorites: number | null;
+  maxPlayers: number | null;
+  genre: string | null;
+  /** ISO date of the last update. */
+  updated: string | null;
+  bannerUrl: string | null;
+}
+
+export interface LuduvoDetails {
+  place: LuduvoPlace;
+  createdAt: number | null;
+  updatedAt: number | null;
+  ageRating: string | null;
+  contentWarnings: string[];
+  groupId: number | null;
+  groupName: string | null;
+}
+
+export interface LuduvoRating {
+  likes: number;
+  dislikes: number;
+  /** 1 liked, -1 disliked, 0 not rated. */
+  vote: number;
+}
+
+export interface LuduvoServer {
+  id: string;
+  playing: number;
+  maxPlayers: number;
+  players: { id: number; name: string; avatarUrl: string | null }[];
+}
+
+/** A Roblox private server you own. */
+export interface OwnedServer {
+  id: number;
+  name: string;
+  active: boolean;
+  /** ISO date the subscription runs out. */
+  expires: string | null;
+  willRenew: boolean;
+  price: number | null;
+  /** Whether your friends can join without an invite; null when Roblox didn't say. */
+  friendsAllowed: boolean | null;
+}
+
+/** Whether you can make a Roblox private server for a game, and its monthly price (0 is free). */
+export interface ServerOffer {
+  canCreate: boolean;
+  price: number | null;
+}
+
+/** A Roblox group, and where you stand in it. */
+export interface GroupInfo {
+  id: number;
+  name: string;
+  members: number;
+  verified: boolean;
+  /** Anyone can join straight away; otherwise joining sends a request the group approves. */
+  publicEntry: boolean;
+  /** Your rank's name when you're in it. */
+  myRole: string | null;
+}

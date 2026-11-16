@@ -1,8 +1,10 @@
 <script lang="ts">
   import "$lib/styles/app.css";
   import Button from "$lib/components/Button.svelte";
+  import GameRail from "$lib/components/GameRail.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import LaunchDialog from "$lib/components/LaunchDialog.svelte";
+  import LuduvoRail from "$lib/components/LuduvoRail.svelte";
   import Logo from "$lib/components/Logo.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Onboarding from "$lib/components/Onboarding.svelte";
@@ -11,10 +13,18 @@
   import Toasts from "$lib/components/Toasts.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
   import { acceptMultiInstance, app, boot, MAX_INSTANCES, onWindows, play } from "$lib/state.svelte";
+  import { page } from "$app/state";
+  import { gameOf } from "$lib/games";
   import { onMount } from "svelte";
 
   let { children } = $props();
   onMount(boot);
+
+  const game = $derived(gameOf(page.url.pathname));
+  // The accent colour follows the game; dialogs and toasts live outside the shell, so it goes on the root.
+  $effect(() => {
+    document.documentElement.dataset.game = game.id;
+  });
 </script>
 
 {#if !app.booted}
@@ -30,12 +40,13 @@
   <div class="shell">
     <TopBar />
     <div class="frame">
+      <GameRail />
       <Sidebar />
       <div class="panel">
         {#if !app.online}
           <div class="offline" role="status"><Icon name="wifiOff" size={16} />You're offline. Games and thumbnails will load again when the connection is back.</div>
         {/if}
-        {#if app.batch.length}
+        {#if app.batch.length && game.id === "roblox"}
           <div class="batch" role="status">
             <Icon name="players" size={16} />
             <span>
@@ -47,7 +58,7 @@
         {/if}
         <div class="body">
           <main>{@render children()}</main>
-          <RightRail />
+          {#if game.id === "roblox"}<RightRail />{:else}<LuduvoRail />{/if}
         </div>
       </div>
     </div>

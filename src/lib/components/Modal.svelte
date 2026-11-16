@@ -2,7 +2,13 @@
   import type { Snippet } from "svelte";
   import Icon from "./Icon.svelte";
 
-  let { title, onclose, children, actions }: { title: string; onclose: () => void; children: Snippet; actions?: Snippet } = $props();
+  let {
+    title,
+    onclose,
+    children,
+    actions,
+    wide = false,
+  }: { title: string; onclose: () => void; children: Snippet; actions?: Snippet; /** Room for a game page. */ wide?: boolean } = $props();
   let dialog: HTMLDialogElement;
 
   $effect(() => {
@@ -10,7 +16,7 @@
   });
 </script>
 
-<dialog bind:this={dialog} {onclose} onclick={(e) => e.target === dialog && dialog.close()} aria-labelledby="modal-title">
+<dialog bind:this={dialog} class:wide {onclose} onclick={(e) => e.target === dialog && dialog.close()} aria-labelledby="modal-title">
   <div class="panel">
     <header>
       <h2 id="modal-title">{title}</h2>
@@ -29,6 +35,9 @@
     color: inherit;
     max-width: min(560px, calc(100vw - 48px));
     width: 100%;
+  }
+  dialog.wide {
+    max-width: min(760px, calc(100vw - 48px));
   }
   dialog::backdrop {
     background: rgba(2, 4, 7, 0.7);

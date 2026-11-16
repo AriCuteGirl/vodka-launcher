@@ -401,6 +401,72 @@ pub struct GameStanding {
     pub down_votes: Option<u64>,
 }
 
+/// What the game page shows about a Roblox experience.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameDetails {
+    pub universe_id: u64,
+    pub name: String,
+    /// The place Play starts in.
+    pub root_place_id: u64,
+    pub creator_id: Option<u64>,
+    /// `Group` or `User`.
+    pub creator_type: Option<String>,
+    pub description: String,
+    pub creator: String,
+    pub creator_verified: bool,
+    pub playing: Option<u64>,
+    pub visits: Option<u64>,
+    pub favorites: Option<u64>,
+    pub max_players: Option<u64>,
+    pub genre: Option<String>,
+    /// ISO date of the last update.
+    pub updated: Option<String>,
+    /// A wide 768x432 picture, when Roblox has one.
+    pub banner_url: Option<String>,
+    /// All of the game's wide pictures, banner first.
+    pub gallery: Vec<String>,
+    /// The square icon tiles use.
+    pub icon_url: Option<String>,
+}
+
+pub fn game_details(body: &str, banner: Option<&str>) -> Result<GameDetails> {
+    let json: serde_json::Value = serde_json::from_str(body).map_err(|e| AppError::Api(e.to_string()))?;
+    let g = json.get("data").and_then(|d| d.get(0)).ok_or_else(|| AppError::Api("Roblox doesn't know that game".into()))?;
+    let text = |k: &str| g.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    let num = |k: &str| g.get(k).and_then(|v| v.as_u64());
+    let creator = g.get("creator");
+    let genre = text("genre_l1").or_else(|| text("genre")).filter(|g| g != "All");
+    let gallery: Vec<String> = banner
+        .and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok())
+        .and_then(|b| b.pointer("/data/0/thumbnails").and_then(|t| t.as_array()).cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| t.get("state").and_then(|s| s.as_str()) == Some("Completed"))
+        .filter_map(|t| t.get("imageUrl").and_then(|u| u.as_str()).map(str::to_owned))
+        .filter(|u| u.starts_with("https://") && u.contains(".rbxcdn.com/"))
+        .collect();
+    Ok(GameDetails {
+        universe_id: num("id").unwrap_or_default(),
+        name: text("name").unwrap_or_default(),
+        root_place_id: num("rootPlaceId").unwrap_or_default(),
+        creator_id: creator.and_then(|c| c.get("id")).and_then(|v| v.as_u64()),
+        creator_type: creator.and_then(|c| c.get("type")).and_then(|v| v.as_str()).map(str::to_owned),
+        description: text("description").unwrap_or_default(),
+        creator: creator.and_then(|c| c.get("name")).and_then(|n| n.as_str()).unwrap_or_default().to_owned(),
+        creator_verified: creator.and_then(|c| c.get("hasVerifiedBadge")).and_then(|v| v.as_bool()).unwrap_or(false),
+        playing: num("playing"),
+        visits: num("visits"),
+        favorites: num("favoritedCount"),
+        max_players: num("maxPlayers"),
+        genre: genre.map(|g| g.replace('_', " ")),
+        updated: text("updated"),
+        banner_url: gallery.first().cloned(),
+        gallery,
+        icon_url: None,
+    })
+}
+
 pub fn game_standing(favorite: &str, mine: &str, totals: Option<&str>) -> Result<GameStanding> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -551,6 +617,165 @@ pub fn server_for_group(servers: &[Server], needed: u32) -> Option<&Server> {
 }
 
 /// Private servers that come with an access code (the ones this account may join).
+/// Decodes standard base64 (with or without padding) holding JSON, as Roblox's challenge headers do.
+pub fn base64_json(text: &str) -> Option<serde_json::Value> {
+    let mut bits: u32 = 0;
+    let mut count = 0;
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    for c in text.trim().bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            b'=' => break,
+            _ => return None,
+        };
+        bits = (bits << 6) | v as u32;
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            out.push((bits >> count) as u8);
+            bits &= (1 << count) - 1;
+        }
+    }
+    serde_json::from_slice(&out).ok()
+}
+
+/// The field names (not values) of a JSON object, for describing an unfamiliar answer in development logs.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub fn shape_keys(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Object(m) => m.iter().map(|(k, v)| match v {
+            serde_json::Value::Object(_) => format!("{k}: {{{}}}", shape_keys(v)),
+            serde_json::Value::String(s) if k.to_lowercase().contains("type") || k.to_lowercase().contains("action") => format!("{k}={s:?}"),
+            _ => k.clone(),
+        }).collect::<Vec<_>>().join(", "),
+        _ => "(not an object)".into(),
+    }
+}
+
+/// A Roblox group, and where you stand in it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupInfo {
+    pub id: u64,
+    pub name: String,
+    pub members: u64,
+    pub verified: bool,
+    /// Anyone can join straight away; otherwise joining sends a request the group approves.
+    pub public_entry: bool,
+    /// Your rank's name when you're in it.
+    pub my_role: Option<String>,
+}
+
+pub fn group_info(body: &str) -> Result<GroupInfo> {
+    let g: serde_json::Value = serde_json::from_str(body).map_err(|e| bad("group", e))?;
+    Ok(GroupInfo {
+        id: g.get("id").and_then(|v| v.as_u64()).ok_or_else(|| AppError::Api("Roblox doesn't know that group".into()))?,
+        name: g.get("name").and_then(|v| v.as_str()).unwrap_or("Group").to_owned(),
+        members: g.get("memberCount").and_then(|v| v.as_u64()).unwrap_or(0),
+        verified: g.get("hasVerifiedBadge").and_then(|v| v.as_bool()).unwrap_or(false),
+        public_entry: g.get("publicEntryAllowed").and_then(|v| v.as_bool()).unwrap_or(false),
+        my_role: None,
+    })
+}
+
+/// Your rank in `group_id`, from `/v1/users/{id}/groups/roles`.
+pub fn role_in(body: &str, group_id: u64) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    json.get("data")?
+        .as_array()?
+        .iter()
+        .find(|m| m.pointer("/group/id").and_then(|v| v.as_u64()) == Some(group_id))
+        .and_then(|m| m.pointer("/role/name").and_then(|v| v.as_str()).map(str::to_owned))
+}
+
+/// Whether you can make a private server for a game, and what it costs a month, as the signed-in game page says.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerOffer {
+    pub can_create: bool,
+    /// Robux a month; 0 is free.
+    pub price: Option<u64>,
+}
+
+fn data_attr<'a>(html: &'a str, name: &str) -> Option<&'a str> {
+    let key = format!("{name}=\"");
+    let start = html.find(&key)? + key.len();
+    let len = html[start..].find('"')?;
+    Some(&html[start..start + len])
+}
+
+/// Reads `data-private-server-price` and `data-can-create-server` from a signed-in game page.
+pub fn server_offer(html: &str) -> ServerOffer {
+    let price = data_attr(html, "data-private-server-price").and_then(|p| p.trim().parse::<u64>().ok());
+    let can = data_attr(html, "data-can-create-server").is_some_and(|v| v.eq_ignore_ascii_case("true"));
+    ServerOffer { can_create: can && price.is_some(), price }
+}
+
+/// The game page's own path, like `/games/2753915549/Blox-Fruits`.
+pub fn canonical_path(body: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    let path = json.pointer("/data/0/canonicalUrlPath")?.as_str()?;
+    (path.starts_with("/games/") && !path.contains("..") && path.bytes().all(|b| b.is_ascii_alphanumeric() || b"/-_".contains(&b))).then(|| path.to_owned())
+}
+
+/// A private server you own, from `my-private-servers`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnedServer {
+    pub id: u64,
+    pub name: String,
+    pub active: bool,
+    /// ISO date the subscription runs out.
+    pub expires: Option<String>,
+    pub will_renew: bool,
+    pub price: Option<u64>,
+    /// Whether your friends can join without an invite; `None` when Roblox didn't say.
+    pub friends_allowed: Option<bool>,
+}
+
+/// Your own private servers for one game.
+pub fn owned_servers(body: &str, universe_id: u64) -> Result<Vec<OwnedServer>> {
+    let json: serde_json::Value = serde_json::from_str(body).map_err(|e| bad("your private servers", e))?;
+    let list = json.get("data").and_then(|d| d.as_array()).cloned().unwrap_or_default();
+    Ok(list
+        .iter()
+        .filter(|s| s.get("universeId").and_then(|v| v.as_u64()) == Some(universe_id))
+        .filter_map(|s| {
+            Some(OwnedServer {
+                id: s.get("privateServerId").and_then(|v| v.as_u64())?,
+                name: s.get("name").and_then(|v| v.as_str()).filter(|n| !n.trim().is_empty()).unwrap_or("Private server").to_owned(),
+                active: s.get("active").and_then(|v| v.as_bool()).unwrap_or(false),
+                expires: s.get("expirationDate").and_then(|v| v.as_str()).map(str::to_owned),
+                will_renew: s.get("willRenew").and_then(|v| v.as_bool()).unwrap_or(false),
+                price: s.get("priceInRobux").and_then(|v| v.as_u64()),
+                friends_allowed: None,
+            })
+        })
+        .collect())
+}
+
+/// `permissions.friendsAllowed` from a private server's own settings.
+pub fn friends_allowed(body: &str) -> Option<bool> {
+    serde_json::from_str::<serde_json::Value>(body).ok()?.pointer("/permissions/friendsAllowed")?.as_bool()
+}
+
+/// The id of the private server Roblox just made (`vipServerId`).
+pub fn created_server_id(body: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(body).ok()?.get("vipServerId")?.as_u64()
+}
+
+/// The invite link of a private server you own: only a roblox.com link is passed on.
+pub fn invite_link(body: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    let link = json.get("link").and_then(|v| v.as_str())?;
+    let url = reqwest::Url::parse(link).ok()?;
+    (url.scheme() == "https" && matches!(url.host_str(), Some("www.roblox.com") | Some("roblox.com"))).then(|| link.to_owned())
+}
+
 pub fn private_servers(body: &str) -> Result<Vec<PrivateServer>> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -1179,5 +1404,65 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].universe_id, 994732206);
         assert!(out[0].icon_url.is_some());
+    }
+
+    #[test]
+    fn reads_game_details_and_banner() {
+        let body = r#"{"data":[{"id":994732206,"rootPlaceId":2753915549,"name":"Blox Fruits","description":" Become a master swordsman. ","creator":{"id":4372130,"name":"Gamer Robot Inc","type":"Group","hasVerifiedBadge":true},"playing":319863,"visits":65523923109,"maxPlayers":12,"updated":"2026-11-14T18:22:45.04Z","genre":"Adventure","genre_l1":"RPG","favoritedCount":20250537}]}"#;
+        let banner = r#"{"data":[{"universeId":994732206,"error":null,"thumbnails":[{"targetId":1,"state":"Completed","imageUrl":"https://tr.rbxcdn.com/x/768/432/Image/Png/noFilter"}]}]}"#;
+        let d = game_details(body, Some(banner)).unwrap();
+        assert_eq!(d.description, "Become a master swordsman.");
+        assert_eq!((d.creator.as_str(), d.creator_verified, d.max_players, d.favorites), ("Gamer Robot Inc", true, Some(12), Some(20250537)));
+        assert_eq!(d.genre.as_deref(), Some("RPG"));
+        assert_eq!(d.banner_url.as_deref(), Some("https://tr.rbxcdn.com/x/768/432/Image/Png/noFilter"));
+        assert_eq!((d.name.as_str(), d.root_place_id, d.creator_id, d.creator_type.as_deref()), ("Blox Fruits", 2753915549, Some(4372130), Some("Group")));
+        assert_eq!(d.gallery.len(), 1);
+        let pending = r#"{"data":[{"thumbnails":[{"state":"Pending","imageUrl":""}]}]}"#;
+        assert_eq!(game_details(body, Some(pending)).unwrap().banner_url, None);
+    }
+
+    #[test]
+    fn reads_owned_servers_for_one_game_and_their_link() {
+        let body = r#"{"data":[
+            {"active":true,"universeId":5,"placeId":50,"name":"Farm","privateServerId":77,"priceInRobux":100,"expirationDate":"2026-12-01T00:00:00Z","willRenew":true},
+            {"active":false,"universeId":6,"placeId":60,"name":"Other","privateServerId":78}
+        ]}"#;
+        let mine = owned_servers(body, 5).unwrap();
+        assert_eq!(mine.len(), 1);
+        assert_eq!((mine[0].id, mine[0].name.as_str(), mine[0].active, mine[0].price, mine[0].will_renew), (77, "Farm", true, Some(100), true));
+        assert_eq!(invite_link(r#"{"link":"https://www.roblox.com/share?code=abc&type=Server"}"#).as_deref(), Some("https://www.roblox.com/share?code=abc&type=Server"));
+        assert_eq!(invite_link(r#"{"link":"https://evil.test/x"}"#), None);
+        assert_eq!(invite_link(r#"{"joinCode":"x"}"#), None);
+        assert_eq!(friends_allowed(r#"{"id":77,"permissions":{"friendsAllowed":true,"clanAllowed":false}}"#), Some(true));
+        assert_eq!(friends_allowed(r#"{"id":77}"#), None);
+        assert_eq!(created_server_id(r#"{"id":"abc","vipServerId":1234,"name":"x"}"#), Some(1234));
+    }
+
+    #[test]
+    fn reads_the_private_server_offer_from_the_game_page() {
+        let page = r#"<div id="game-detail-meta-data" data-can-create-server="True" data-private-server-price="39" data-private-server-limit="5">"#;
+        assert_eq!(server_offer(page), ServerOffer { can_create: true, price: Some(39) });
+        assert_eq!(server_offer(r#"data-can-create-server="False" data-private-server-price="0""#).can_create, false);
+        assert_eq!(server_offer("<html>signed out</html>"), ServerOffer { can_create: false, price: None });
+        assert_eq!(canonical_path(r#"{"data":[{"canonicalUrlPath":"/games/1/Blox-Fruits"}]}"#).as_deref(), Some("/games/1/Blox-Fruits"));
+        assert_eq!(canonical_path(r#"{"data":[{"canonicalUrlPath":"https://evil.test/x"}]}"#), None);
+    }
+
+    #[test]
+    fn reads_a_group_and_your_rank_in_it() {
+        let g = group_info(r#"{"id":4372130,"name":"Gamer Robot Inc","memberCount":19707257,"publicEntryAllowed":true,"hasVerifiedBadge":true}"#).unwrap();
+        assert_eq!((g.id, g.name.as_str(), g.members, g.public_entry, g.verified), (4372130, "Gamer Robot Inc", 19707257, true, true));
+        let roles = r#"{"data":[{"group":{"id":5},"role":{"name":"Member","rank":1}},{"group":{"id":4372130},"role":{"name":"Fan","rank":2}}]}"#;
+        assert_eq!(role_in(roles, 4372130).as_deref(), Some("Fan"));
+        assert_eq!(role_in(roles, 9), None);
+    }
+
+    #[test]
+    fn decodes_challenge_metadata() {
+        // {"actionType":"Generic","unifiedCaptchaId":"x"}
+        let v = base64_json("eyJhY3Rpb25UeXBlIjoiR2VuZXJpYyIsInVuaWZpZWRDYXB0Y2hhSWQiOiJ4In0=").unwrap();
+        assert_eq!(v["actionType"], "Generic");
+        assert_eq!(shape_keys(&v), "actionType=\"Generic\", unifiedCaptchaId");
+        assert!(base64_json("not base64!").is_none());
     }
 }
