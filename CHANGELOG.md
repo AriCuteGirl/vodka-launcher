@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Luduvo Avatar: the preview picture now catches up after you change something (Luduvo draws it a few seconds later); it says "Updating picture…" meanwhile.
 - Luduvo Avatar: items you own in a colour (Blue, Pink…) show that colour's picture and a colour chip, instead of all looking the same.
 - Luduvo Avatar: bodies (bundles) can be worn again: they're saved the way Luduvo wants, apart from clothes and accessories. A shirt, pants or face replaces the one in the same slot; you always keep a body on.
 - Luduvo Avatar: outfits are big picture cards you click to wear, with "Save current look"; a new outfit's picture appears once Luduvo has drawn it.

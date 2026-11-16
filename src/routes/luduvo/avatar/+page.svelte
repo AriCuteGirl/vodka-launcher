@@ -21,6 +21,32 @@
   let outfitName = $state("");
   let pictureFailed = $state(false);
   let naming = $state(false);
+  /** Luduvo draws the new picture a few seconds after a change. */
+  let redrawing = $state(false);
+  let redrawRun = 0;
+
+  /** Looks again until the picture differs from `before`, so the preview catches up with what you wear. */
+  async function waitForPicture(before: string | null) {
+    const run = ++redrawRun;
+    redrawing = true;
+    for (const ms of [1000, 1500, 2000, 3000, 4000, 6000]) {
+      await new Promise((r) => setTimeout(r, ms));
+      if (run !== redrawRun) return;
+      try {
+        const now = await api.luduvoAvatar();
+        if (run !== redrawRun) return;
+        if (now.pictureUrl && now.pictureUrl !== before) {
+          avatar = { status: "ready", data: now };
+          pictureFailed = false;
+          break;
+        }
+      } catch {
+        break;
+      }
+    }
+    if (run === redrawRun) redrawing = false;
+  }
+  const currentPicture = () => (avatar.status === "ready" ? avatar.data.pictureUrl : null);
   /** The outfit put on last, until something else changes. */
   let wornOutfit = $state<number | null>(null);
   let brokenPictures = $state(new Set<number>());
@@ -74,8 +100,12 @@
 
   async function apply(next: LuduvoOwned[], done: string) {
     saving = true;
+    const before = currentPicture();
+    redrawRun++;
+    redrawing = false;
     try {
       avatar = { status: "ready", data: await api.luduvoSetWearing(next) };
+      if (avatar.data.pictureUrl === before) void waitForPicture(before);
       pictureFailed = false;
       wornOutfit = null;
       toast(done, "ok");
@@ -107,8 +137,12 @@
   async function wearOutfit(o: LuduvoOutfit) {
     if (saving) return;
     saving = true;
+    const before = currentPicture();
+    redrawRun++;
+    redrawing = false;
     try {
       avatar = { status: "ready", data: await api.luduvoWearOutfit(o.id) };
+      if (avatar.data.pictureUrl === before) void waitForPicture(before);
       pictureFailed = false;
       wornOutfit = o.id;
       toast(`Wearing ${o.name}.`, "ok");
@@ -157,7 +191,7 @@
   {:else}
     <div class="layout">
       <aside class="me glass">
-        <div class="figure" class:busy={saving}>
+        <div class="figure" class:busy={saving || redrawing}>
           {#if avatar.status === "ready" && avatar.data.pictureUrl && !pictureFailed}
             <img src={avatar.data.pictureUrl} alt="Your avatar" onerror={() => (pictureFailed = true)} />
           {:else if avatar.status === "loading"}
@@ -165,7 +199,7 @@
           {:else}
             <Icon name="avatar" size={64} />
           {/if}
-          {#if saving}<span class="saving">Saving…</span>{/if}
+          {#if saving}<span class="saving">Saving…</span>{:else if redrawing}<span class="saving">Updating picture…</span>{/if}
         </div>
         <h2>Wearing <span class="count">{wearing.length}</span></h2>
         {#if wearing.length === 0}
