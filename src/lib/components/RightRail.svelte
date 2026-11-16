@@ -45,11 +45,13 @@
       <ul class="list">
         {#each around.slice(0, 8) as f (f.id)}
           <li class="friend">
-            <Avatar name={f.displayName} src={f.avatarUrl} size={30} status={f.presence.kind === "in_game" ? "playing" : "online"} />
-            <div class="who">
-              <b>{f.displayName}</b>
-              <span>{f.presence.kind === "in_game" ? (f.presence.location ?? "In a game") : f.presence.kind === "studio" ? "In Studio" : "Online"}</span>
-            </div>
+            <a class="open" href="/users/{f.id}" title="Open {f.displayName}'s profile">
+              <Avatar name={f.displayName} src={f.avatarUrl} size={30} status={f.presence.kind === "in_game" ? "playing" : "online"} />
+              <div class="who">
+                <b>{f.displayName}</b>
+                <span>{f.presence.kind === "in_game" ? (f.presence.location ?? "In a game") : f.presence.kind === "studio" ? "In Studio" : "Online"}</span>
+              </div>
+            </a>
             {#if f.presence.gameId}<button class="mini" onclick={() => joinFriend(f)}>Join</button>{/if}
           </li>
         {/each}
@@ -64,7 +66,7 @@
         <span class="time"><Icon name="clock" size={14} />{elapsed((now - inst.startedAtMs) / 1000)}</span>
       </header>
       <p class="game">{inst.game.name}</p>
-      <p class="who faint">{inst.accountName}{#if !onWindows()} · {inst.fps != null ? `${Math.round(inst.fps)} FPS · ` : ""}{Math.round(inst.cpuPercent)}% CPU · {memory(inst.memoryBytes)}{/if}</p>
+      <p class="who faint">{inst.accountName}{#if !onWindows()} · {inst.fps != null ? `${Math.round(inst.fps)} FPS · ` : ""}{Math.round(inst.cpuPercent)}% CPU · {memory(inst.memoryBytes)}{:else if inst.memoryBytes > 0} · {memory(inst.memoryBytes)}{/if}</p>
       {#if inst.phase === "starting"}
         <pre class="selectable" aria-label={onWindows() ? "Game status" : "Mocktail output"}>{inst.log.slice(-12).join("\n") || (onWindows() ? "Waiting for Roblox to report you in the game…" : "Waiting for Mocktail…")}</pre>
       {/if}
@@ -293,6 +295,18 @@
   }
   li.friend:hover {
     background: var(--glass-hover);
+  }
+  .open {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    flex: 1;
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+  }
+  .open:hover b {
+    color: var(--frost);
   }
   .friend .who {
     display: grid;

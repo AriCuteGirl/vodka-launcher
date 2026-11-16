@@ -232,6 +232,246 @@ pub fn servers(v: &Value) -> Vec<Server> {
         .collect()
 }
 
+/// One thing in Luduvo's store.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreItem {
+    pub id: u64,
+    pub name: String,
+    pub description: String,
+    pub creator: String,
+    /// C$; `None` when it isn't for sale.
+    pub price: Option<u64>,
+    pub limited: bool,
+    pub asset_type: String,
+    pub slot: String,
+    pub picture_url: Option<String>,
+    pub sales: u64,
+    pub likes: u64,
+    pub dislikes: u64,
+    /// Only on the item's own page.
+    pub owners: Option<u64>,
+    /// 1 liked, -1 disliked, 0 not rated; only on the item's own page when signed in.
+    pub my_vote: i64,
+    /// Ends sale at this Unix time, for timed items.
+    pub expires_at: Option<u64>,
+}
+
+pub fn store_item(v: &Value) -> Option<StoreItem> {
+    let id = v.get("id").and_then(Value::as_u64)?;
+    let on_sale = v.get("is_on_sale").map(|x| x.as_bool().unwrap_or(x.as_u64() == Some(1))).unwrap_or(true);
+    let rating = v.get("rating");
+    Some(StoreItem {
+        id,
+        name: { let n = text(v, "name"); if n.is_empty() { format!("Item {id}") } else { n } },
+        description: text(v, "description"),
+        creator: text(v, "creator_username"),
+        price: if on_sale { v.get("price").and_then(Value::as_u64) } else { None },
+        limited: v.get("is_limited").map(|x| x.as_bool().unwrap_or(x.as_u64() == Some(1))).unwrap_or(false),
+        asset_type: text(v, "asset_type"),
+        slot: text(v, "slot"),
+        picture_url: asset_url(v.get("thumbnail_url")),
+        sales: num(v, "sales_count"),
+        likes: rating.map(|r| num(r, "thumbs_up")).unwrap_or_else(|| num(v, "thumbs_up")),
+        dislikes: rating.map(|r| num(r, "thumbs_down")).unwrap_or_else(|| num(v, "thumbs_down")),
+        owners: v.get("owners_count").and_then(Value::as_u64),
+        my_vote: rating.and_then(|r| r.get("user_vote")).and_then(Value::as_i64).unwrap_or(0).signum(),
+        expires_at: v.get("expires_at").and_then(Value::as_u64),
+    })
+}
+
+/// A page of the store: `{"items": [...], "total": n}`.
+pub fn store_page(v: &Value) -> (Vec<StoreItem>, u64) {
+    let items = v.get("items").and_then(Value::as_array).map(|l| l.iter().filter_map(store_item).collect()).unwrap_or_default();
+    (items, num(v, "total"))
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreCategory {
+    pub asset_type: String,
+    pub slot: String,
+    pub name: String,
+}
+
+pub fn store_categories(v: &Value) -> Vec<StoreCategory> {
+    v.as_array()
+        .or_else(|| v.get("categories").and_then(Value::as_array))
+        .map(|l| {
+            l.iter()
+                .map(|c| StoreCategory { asset_type: text(c, "asset_type"), slot: text(c, "slot"), name: text(c, "display_name") })
+                .filter(|c| !c.name.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Something you own or wear: an item and which variant of it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnedItem {
+    pub id: u64,
+    pub variant: u64,
+    pub name: String,
+    pub asset_type: String,
+    pub slot: String,
+    pub picture_url: Option<String>,
+}
+
+/// An entry from the inventory or the equipped list. Entries may be flat or wrap the item (`{"item": {...}}`),
+/// and name the item `item_id` or `id`.
+pub fn owned_item(v: &Value) -> Option<OwnedItem> {
+    let inner = v.get("item").filter(|i| i.is_object()).unwrap_or(v);
+    let id = v.get("item_id").and_then(Value::as_u64).or_else(|| inner.get("id").and_then(Value::as_u64)).filter(|id| *id > 0)?;
+    let pick = |k: &str| {
+        let t = text(inner, k);
+        if t.is_empty() { text(v, k) } else { t }
+    };
+    // Inventory entries call it `item_name`; profile and store entries `name`.
+    let name = Some(pick("name")).filter(|n| !n.is_empty()).unwrap_or_else(|| pick("item_name"));
+    Some(OwnedItem {
+        id,
+        variant: v.get("variant_index").and_then(Value::as_u64).unwrap_or(0),
+        name: if name.is_empty() { format!("Item {id}") } else { name },
+        asset_type: pick("asset_type"),
+        // Profile entries list `slots` (a body covers six); the first one names it.
+        slot: {
+            let one = pick("slot");
+            if one.is_empty() { v.get("slots").and_then(Value::as_array).and_then(|s| s.first()).and_then(Value::as_str).unwrap_or_default().to_owned() } else { one }
+        },
+        picture_url: asset_url(inner.get("thumbnail_url")).or_else(|| asset_url(v.get("thumbnail_url"))),
+    })
+}
+
+/// Any list of owned or worn items: `{"items": [...]}`, `{"equipped": [...]}`, `{"inventory": [...]}` or a bare array.
+pub fn owned_list(v: &Value) -> Vec<OwnedItem> {
+    let list = ["equipped_items", "items", "equipped", "inventory", "data"].iter().find_map(|k| v.get(*k).and_then(Value::as_array)).or_else(|| v.as_array());
+    let mut seen = std::collections::HashSet::new();
+    list.map(|l| l.iter().filter_map(owned_item).filter(|i| seen.insert((i.id, i.variant))).collect()).unwrap_or_default()
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Outfit {
+    pub id: u64,
+    pub name: String,
+    pub picture_url: Option<String>,
+}
+
+pub fn outfits(v: &Value) -> Vec<Outfit> {
+    v.get("outfits")
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|o| Some(Outfit { id: o.get("id")?.as_u64()?, name: text(o, "name"), picture_url: headshot(o) }))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Someone's Luduvo profile.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub id: u64,
+    pub name: String,
+    pub display_name: String,
+    pub bio: String,
+    /// Their short status line, when set.
+    pub status: String,
+    pub tier: String,
+    /// Unix seconds.
+    pub member_since: Option<u64>,
+    pub last_active: Option<u64>,
+    pub friends: Option<u64>,
+    pub places: Option<u64>,
+    pub items: Option<u64>,
+    pub friends_hidden: bool,
+    pub badges: Vec<String>,
+    pub wearing: Vec<OwnedItem>,
+    pub headshot_url: Option<String>,
+    /// Filled in separately: the full-body picture and what they're doing.
+    pub picture_url: Option<String>,
+    pub state: String,
+    pub place_id: Option<u64>,
+    pub place_title: Option<String>,
+    pub joinable: bool,
+}
+
+pub fn profile(v: &Value) -> Option<Profile> {
+    let id = v.get("user_id").or_else(|| v.get("id")).and_then(Value::as_u64)?;
+    let name = text(v, "username");
+    let shown = text(v, "display_name");
+    Some(Profile {
+        id,
+        display_name: if shown.is_empty() { name.clone() } else { shown },
+        name,
+        bio: text(v, "bio"),
+        status: text(v, "status"),
+        tier: text(v, "tier"),
+        member_since: v.get("member_since").and_then(Value::as_u64),
+        last_active: v.get("last_active").and_then(Value::as_u64),
+        friends: v.get("friend_count").and_then(Value::as_u64),
+        places: v.get("place_count").and_then(Value::as_u64),
+        items: v.get("item_count").and_then(Value::as_u64),
+        friends_hidden: v.get("friends_hidden").and_then(Value::as_bool).unwrap_or(false),
+        badges: v.get("badges").and_then(Value::as_array).map(|b| b.iter().map(|x| text(x, "name")).filter(|n| !n.is_empty()).collect()).unwrap_or_default(),
+        wearing: owned_list(v),
+        headshot_url: asset_url(v.get("headshot_url")),
+        picture_url: None,
+        state: "offline".into(),
+        place_id: None,
+        place_title: None,
+        joinable: false,
+    })
+}
+
+/// `/users/{id}/presence`: `{"online": true, "state": "in_game", "joinable": true, "place": {...}}`.
+pub fn single_presence(v: &Value) -> Presence {
+    let state = ["state", "status"].iter().map(|k| text(v, k)).find(|s| !s.is_empty()).unwrap_or_else(|| {
+        if v.get("online").and_then(Value::as_bool).unwrap_or(false) { "online".into() } else { "offline".into() }
+    });
+    let place = v.get("place").filter(|x| x.is_object());
+    let place_id = v.get("place_id").and_then(Value::as_u64).or_else(|| place.and_then(|x| x.get("id")).and_then(Value::as_u64));
+    let title = [text(v, "place_title"), place.map(|x| text(x, "title")).unwrap_or_default()].into_iter().find(|t| !t.is_empty());
+    let joinable = v.get("joinable").and_then(Value::as_bool).unwrap_or(state == "in_game" && place_id.is_some());
+    Presence { state, place_id, place_title: title, joinable }
+}
+
+/// A group someone is in.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    pub id: u64,
+    pub name: String,
+    pub members: u64,
+    pub role: String,
+    pub icon_url: Option<String>,
+}
+
+pub fn groups(v: &Value) -> Vec<Group> {
+    v.get("groups")
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|m| {
+                    let g = m.get("group").filter(|g| g.is_object()).unwrap_or(m);
+                    Some(Group {
+                        id: g.get("id").or_else(|| m.get("group_id")).and_then(Value::as_u64)?,
+                        name: text(g, "name"),
+                        members: g.get("member_count").or_else(|| g.get("members")).and_then(Value::as_u64).unwrap_or(0),
+                        role: [text(m, "role_name"), m.get("role").map(|r| if r.is_object() { text(r, "name") } else { r.as_str().unwrap_or_default().to_owned() }).unwrap_or_default()]
+                            .into_iter()
+                            .find(|r| !r.is_empty())
+                            .unwrap_or_default(),
+                        icon_url: asset_url(g.get("icon_url")).or_else(|| asset_url(g.get("thumbnail_url"))),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Someone on your friends list (or asking to be), with what Luduvo says they're doing.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -293,7 +533,9 @@ pub fn presence(v: &Value) -> std::collections::HashMap<u64, Presence> {
             let place = p.get("place").filter(|x| x.is_object());
             let place_id = p.get("place_id").and_then(Value::as_u64).or_else(|| place.and_then(|x| x.get("id")).and_then(Value::as_u64));
             let title = [text(p, "place_title"), text(p, "game_title"), place.map(|x| text(x, "title")).unwrap_or_default()].into_iter().find(|t| !t.is_empty());
-            Some((id, Presence { state, place_id, place_title: title, joinable: p.get("joinable").and_then(Value::as_bool).unwrap_or(false) }))
+            // The friends-list presence doesn't say `joinable`; someone in a game is, and Luduvo refuses the join if not.
+            let joinable = p.get("joinable").and_then(Value::as_bool).unwrap_or(state == "in_game" && place_id.is_some());
+            Some((id, Presence { state, place_id, place_title: title, joinable }))
         })
         .collect()
 }
@@ -401,6 +643,9 @@ mod tests {
         assert_eq!(p[&3], Presence { state: "in_game".into(), place_id: Some(2869), place_title: Some("BoomBox!".into()), joinable: true });
         assert_eq!(p[&4].state, "online");
         assert!(!p[&4].joinable);
+        // The real friends-list answer: a place, no joinable field.
+        let real = presence(&json!({ "presence": [{ "user_id": 9, "state": "in_game", "place": { "id": 77, "title": "Tower Defense Simulator!" } }] }));
+        assert_eq!((real[&9].place_id, real[&9].place_title.as_deref(), real[&9].joinable), (Some(77), Some("Tower Defense Simulator!"), true));
     }
 
     #[test]
@@ -434,6 +679,62 @@ mod tests {
         assert_eq!(d.content_warnings, vec!["online interactions"]);
         let grouped = details(&json!({ "id": 31, "title": "x", "group_id": 9, "group_name": "Builders" })).unwrap();
         assert_eq!((grouped.group_id, grouped.group_name.as_deref()), (Some(9), Some("Builders")));
+    }
+
+    #[test]
+    fn reads_the_store() {
+        // Trimmed from real /store and /store/{id} answers.
+        let page = json!({ "items": [
+            { "id": 1996, "creator_username": "Luduvo", "name": "???", "price": 42, "is_on_sale": 1, "is_limited": 0, "asset_type": "accessory", "slot": "hat",
+              "thumbnail_url": "https://assets.luduvo.com/items/1996/th.png", "sales_count": 371, "thumbs_up": 62, "thumbs_down": 20, "expires_at": 1821510000 },
+            { "id": 7, "name": "Old hat", "price": 10, "is_on_sale": 0 }
+        ], "total": 1803 });
+        let (items, total) = store_page(&page);
+        assert_eq!(total, 1803);
+        assert_eq!((items[0].id, items[0].price, items[0].creator.as_str(), items[0].sales, items[0].slot.as_str()), (1996, Some(42), "Luduvo", 371, "hat"));
+        assert_eq!(items[1].price, None, "off sale has no price");
+        let one = store_item(&json!({ "id": 1996, "price": 42, "is_on_sale": 1, "owners_count": 370, "rating": { "thumbs_up": 62, "thumbs_down": 20, "user_vote": 1 } })).unwrap();
+        assert_eq!((one.owners, one.my_vote, one.likes), (Some(370), 1, 62));
+        let cats = store_categories(&json!([{ "asset_type": "accessory", "slot": "hat", "display_name": "Hats" }]));
+        assert_eq!(cats[0].name, "Hats");
+    }
+
+    #[test]
+    fn reads_owned_items_in_any_wrapping() {
+        let list = json!({ "items": [
+            { "item_id": 1996, "variant_index": 0, "name": "???", "asset_type": "accessory", "slot": "hat", "thumbnail_url": "https://assets.luduvo.com/items/1996/th.png" },
+            { "item": { "id": 17, "name": "Body", "asset_type": "bundle" }, "variant_index": 2 },
+            { "item_id": 1996, "variant_index": 0 }
+        ]});
+        let items = owned_list(&list);
+        assert_eq!(items.iter().map(|i| (i.id, i.variant)).collect::<Vec<_>>(), vec![(1996, 0), (17, 2)]);
+        assert_eq!((items[1].name.as_str(), items[1].asset_type.as_str()), ("Body", "bundle"));
+        // The profile's `equipped_items`, as the real answer has them.
+        let worn = owned_list(&json!({ "user_id": 1, "equipped_items": [
+            { "item_id": 486, "name": "Spark Cap", "asset_type": "accessory", "thumbnail_url": "https://assets.luduvo.com/item_previews/486/a.png", "slots": ["hat"], "variant_index": 0 },
+            { "item_id": 17, "name": "Luduvo Default Bundle", "asset_type": "avatar_bundle", "slots": ["head", "torso"], "variant_index": 0 }
+        ]}));
+        assert_eq!((worn[0].id, worn[0].slot.as_str(), worn[1].asset_type.as_str()), (486, "hat", "avatar_bundle"));
+        assert!(worn[0].picture_url.is_some());
+        // An inventory entry, as the real answer has it: its own `id`, the item's `item_id` and `item_name`.
+        let inv = owned_list(&json!({ "hidden": false, "items": [{ "id": 9001, "item_id": 486, "item_name": "Spark Cap", "asset_type": "accessory", "variant_index": 0 }] }));
+        assert_eq!((inv[0].id, inv[0].name.as_str()), (486, "Spark Cap"));
+        let o = outfits(&json!({ "outfits": [{ "id": 3, "name": "Winter", "headshot_key": "headshots/1/ab.png", "headshot_has_variants": false }] }));
+        assert_eq!((o[0].id, o[0].name.as_str(), o[0].picture_url.as_deref()), (3, "Winter", Some("https://assets.luduvo.com/headshots/1/ab.png")));
+    }
+
+    #[test]
+    fn reads_a_profile_and_presence() {
+        let p = profile(&json!({ "user_id": 1, "username": "luduvo", "display_name": "Luduvo", "bio": "hi", "status": "", "tier": "free",
+            "member_since": 1766534400, "friend_count": 2, "place_count": 1, "friends_hidden": false,
+            "badges": [{ "name": "Administrator" }],
+            "equipped_items": [{ "item_id": 486, "name": "Spark Cap", "asset_type": "accessory", "slots": ["hat"], "variant_index": 0 }] })).unwrap();
+        assert_eq!((p.id, p.display_name.as_str(), p.friends, p.badges.clone(), p.wearing.len()), (1, "Luduvo", Some(2), vec!["Administrator".to_string()], 1));
+        let pr = single_presence(&json!({ "online": true, "state": "in_game", "joinable": true, "place": { "id": 30, "title": "snow battle" } }));
+        assert_eq!((pr.state.as_str(), pr.place_id, pr.joinable), ("in_game", Some(30), true));
+        assert_eq!(single_presence(&json!({ "online": true })).state, "online");
+        let g = groups(&json!({ "groups": [{ "group": { "id": 9, "name": "Builders", "member_count": 40 }, "role": { "name": "Owner" } }] }));
+        assert_eq!((g[0].id, g[0].name.as_str(), g[0].members, g[0].role.as_str()), (9, "Builders", 40, "Owner"));
     }
 
     #[test]

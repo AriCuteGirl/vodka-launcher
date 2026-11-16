@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -28,6 +28,8 @@ async function on<T>(event: string, handler: (payload: T) => void): Promise<() =
 }
 
 export const api = {
+  /** Writes a line to Vodka's terminal output (for problems in the installed app). Never throws. */
+  uiLog: (level: "error" | "warn" | "info", message: string) => call<void>("ui_log", { level, message }).catch(() => {}),
   mocktailStatus: () => call<MocktailStatus>("mocktail_status"),
   beginLogin: () => call<void>("begin_login"),
   currentAccount: () => call<User | null>("current_account"),
@@ -48,6 +50,11 @@ export const api = {
   joinFriend: (userId: number) => call<number>("join_friend", { userId }),
   openPrivateServerPage: (placeId: number, name: string) => call<void>("open_private_server_page", { placeId, name }),
   onRobloxPageClosed: (h: () => void) => on<null>("roblox-page://closed", h),
+  userProfile: (userId: number) => call<Profile>("user_profile", { userId }),
+  userFriends: (userId: number) => call<Person[]>("user_friends", { userId }),
+  userFavorites: (userId: number) => call<Game[]>("user_favorites", { userId }),
+  userGames: (userId: number) => call<Game[]>("user_games", { userId }),
+  userGroups: (userId: number) => call<UserGroup[]>("user_groups", { userId }),
   robloxGroup: (groupId: number) => call<GroupInfo>("roblox_group", { groupId }),
   /** Joins, letting Roblox's own page pass its human check in a hidden window when it asks for one. */
   joinRobloxGroup: (groupId: number, name: string) => call<GroupInfo>("join_roblox_group", { groupId, name }),
@@ -119,6 +126,28 @@ export const api = {
   openExternal: (url: string) => call<void>("open_external", { url }),
   luduvoServers: (placeId: number) => call<LuduvoServer[]>("luduvo_servers", { placeId }),
   luduvoPlayServer: (serverId: string, placeId: number, title: string) => call<LuduvoRunning>("luduvo_play_server", { serverId, placeId, title }),
+  luduvoStoreCategories: () => call<LuduvoCategory[]>("luduvo_store_categories"),
+  luduvoStore: (query: string, assetType: string, slot: string, sort: string, offset: number) =>
+    call<{ items: LuduvoItem[]; total: number }>("luduvo_store", { query, assetType, slot, sort, offset }),
+  luduvoStoreItem: (itemId: number) => call<LuduvoItem>("luduvo_store_item", { itemId }),
+  luduvoRateItem: (itemId: number, value: number) => call<LuduvoItem>("luduvo_rate_item", { itemId, value }),
+  luduvoFavoriteItem: (itemId: number, on: boolean) => call<void>("luduvo_favorite_item", { itemId, on }),
+  /** Buys at exactly the confirmed price; resolves to the new balance. */
+  luduvoBuyItem: (itemId: number, agreedPrice: number) => call<number | null>("luduvo_buy_item", { itemId, agreedPrice }),
+  luduvoProfile: (userId: number) => call<LuduvoProfile>("luduvo_profile", { userId }),
+  luduvoUserFriends: (userId: number) => call<LuduvoFriend[]>("luduvo_user_friends", { userId }),
+  luduvoUserPlaces: (userId: number) => call<LuduvoPlace[]>("luduvo_user_places", { userId }),
+  luduvoUserGroups: (userId: number) => call<LuduvoGroup[]>("luduvo_user_groups", { userId }),
+  luduvoAvatar: () => call<LuduvoAvatar>("luduvo_avatar"),
+  /** Wears exactly these [item id, variant] pairs. */
+  luduvoSetWearing: (items: [number, number][]) => call<LuduvoAvatar>("luduvo_set_wearing", { items }),
+  luduvoInventory: (assetType: string, slot: string, offset: number) => call<LuduvoOwned[]>("luduvo_inventory", { assetType, slot, offset }),
+  luduvoOutfits: () => call<LuduvoOutfit[]>("luduvo_outfits"),
+  luduvoWearOutfit: (outfitId: number) => call<LuduvoAvatar>("luduvo_wear_outfit", { outfitId }),
+  luduvoSaveOutfit: (name: string) => call<LuduvoOutfit[]>("luduvo_save_outfit", { name }),
+  luduvoDeleteOutfit: (outfitId: number) => call<LuduvoOutfit[]>("luduvo_delete_outfit", { outfitId }),
+  luduvoAddFriend: (username: string) => call<void>("luduvo_add_friend", { username }),
+  luduvoRemoveFriend: (userId: number) => call<void>("luduvo_remove_friend", { userId }),
   luduvoFriends: () => call<LuduvoFriend[]>("luduvo_friends"),
   luduvoFriendRequests: () => call<LuduvoFriend[]>("luduvo_friend_requests"),
   luduvoAnswerRequest: (userId: number, accept: boolean) => call<void>("luduvo_answer_request", { userId, accept }),

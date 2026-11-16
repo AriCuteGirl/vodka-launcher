@@ -22,6 +22,7 @@
     gallery: "Design system",
     chat: "Chat",
     avatar: "Avatar",
+    users: "Profile",
   };
   const game = $derived(gameOf(page.url.pathname));
   const crumb = $derived.by(() => {
@@ -95,6 +96,7 @@
               <p>Luduvo account</p>
               <div class="solo"><Avatar name={user.displayName} src={null} size={22} /><span class="who">{user.displayName}<small>@{user.name}</small></span></div>
               <hr />
+              <a role="menuitem" href="/luduvo/users/{user.id}"><Icon name="avatar" size={16} /> Your profile</a>
               <button role="menuitem" onclick={claimDaily}><Icon name="star" size={16} /> Claim daily reward</button>
               <button role="menuitem" onclick={openStudio}><Icon name="terminal" size={16} /> Open Luduvo Studio</button>
               <button role="menuitem" onclick={luduvoSignOut}><Icon name="signOut" size={16} /> Sign out of Luduvo</button>
@@ -136,6 +138,7 @@
               </button>
             {/each}
             <hr />
+            <a role="menuitem" href="/users/{app.account.id}"><Icon name="avatar" size={16} /> Your profile</a>
             <button role="menuitem" onclick={signIn}><Icon name="plus" size={16} /> Add another account</button>
             <a role="menuitem" href="/players"><Icon name="players" size={16} /> Manage accounts</a>
             <button role="menuitem" onclick={() => app.account && removeAccount(app.account.id)}>

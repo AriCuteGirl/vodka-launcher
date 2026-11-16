@@ -30,19 +30,17 @@
     {/if}
   </section>
 
-  {#if app.mocktail?.engine !== "roblox"}
-    <section class="glass">
-      <h2>Performance</h2>
-      <TweaksEditor />
-    </section>
-  {/if}
+  <section class="glass">
+    <h2>Performance</h2>
+    <TweaksEditor />
+  </section>
 
   {#if app.mocktail?.engine === "roblox"}
     <section class="glass">
       <h2>Launching</h2>
       <p class="muted">
-        On Windows, Vodka starts the official Roblox client signed in as the account you pick, using a one-time ticket from Roblox. Frame-rate
-        options, per-game stats, Restart and Gather are Linux features for now.
+        On Windows, Vodka starts the official Roblox client signed in as the account you pick, using a one-time ticket from Roblox. Restart, Gather
+        and per-game CPU and FPS are Linux features for now.
       </p>
       <div class="row">
         <div class="grow">

@@ -69,11 +69,13 @@
       <ul class="list">
         {#each shown as f (f.id)}
           <li class="friend" class:offline={f.state === "offline"}>
-            <Avatar name={f.displayName} src={f.avatarUrl} size={30} status={status(f)} />
-            <div class="who">
-              <b>{f.displayName}</b>
-              <span title={doing(f)}>{doing(f)}</span>
-            </div>
+            <a class="open" href="/luduvo/users/{f.id}" title="Open {f.displayName}'s profile">
+              <Avatar name={f.displayName} src={f.avatarUrl} size={30} status={status(f)} />
+              <div class="who">
+                <b>{f.displayName}</b>
+                <span title={doing(f)}>{doing(f)}</span>
+              </div>
+            </a>
             {#if f.state === "in_game" && f.joinable}
               <button class="mini" disabled={!!luduvo.playing} onclick={() => joinLuduvoFriend(f)} title={luduvo.playing ? "Close your game first" : `Join ${f.displayName}`}>Join</button>
             {/if}
@@ -155,6 +157,18 @@
   }
   .friend.offline {
     opacity: 0.55;
+  }
+  .open {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    flex: 1;
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+  }
+  .open:hover b {
+    color: var(--frost);
   }
   .who {
     display: grid;

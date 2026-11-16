@@ -3,7 +3,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Chart, Game, GameDetails, GameStanding, GroupInfo, OwnedServer, ServerOffer, Item, Offer, Outfit, Person, Presence, PrivateServer, Server, User};
+pub use parse::{Chart, Game, GameDetails, GameStanding, GroupInfo, Profile, UserGroup, OwnedServer, ServerOffer, Item, Offer, Outfit, Person, Presence, PrivateServer, Server, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -499,6 +499,51 @@ impl Client {
     }
 
     /// Private servers of a place that this account can join.
+    /// Someone's profile: who they are, their avatar, counts and (signed in) what they're doing right now.
+    pub async fn profile(&self, cookie: Option<&str>, user_id: u64) -> Result<Profile> {
+        let mut p = parse::profile(&self.get(&format!("https://users.roblox.com/v1/users/{user_id}"), None, LIST_TTL).await?)?;
+        let count = |kind: &'static str| async move {
+            let url = format!("https://friends.roblox.com/v1/users/{user_id}/{kind}/count");
+            self.get(&url, None, LIST_TTL).await.ok().and_then(|b| parse::count(&b))
+        };
+        p.friends = count("friends").await;
+        p.followers = count("followers").await;
+        p.following = count("followings").await;
+        p.avatar_url = self.avatar_picture(user_id).await.ok().flatten();
+        if let Some(c) = cookie {
+            p.presence = self.presences(c, &[user_id]).await.ok().and_then(|mut m| m.remove(&user_id));
+        }
+        Ok(p)
+    }
+
+    /// The public games someone made.
+    pub async fn created_games(&self, user_id: u64) -> Result<Vec<Game>> {
+        let url = format!("https://games.roblox.com/v2/users/{user_id}/games?accessFilter=Public&limit=50&sortOrder=Desc");
+        let games = parse::favorites(&self.get(&url, None, LIST_TTL).await?)?;
+        let ids: Vec<u64> = games.iter().map(|g| g.universe_id).collect();
+        let icons = self.icons(&ids).await.unwrap_or_default();
+        Ok(parse::assemble(&ids, games, &icons))
+    }
+
+    /// The groups someone is in, with their rank and each group's icon.
+    pub async fn user_groups(&self, user_id: u64) -> Result<Vec<UserGroup>> {
+        let mut groups = parse::user_groups(&self.get(&format!("https://groups.roblox.com/v1/users/{user_id}/groups/roles"), None, LIST_TTL).await?)?;
+        let ids: Vec<u64> = groups.iter().map(|g| g.id).collect();
+        for batch in ids.chunks(ICON_BATCH) {
+            let url = format!("https://thumbnails.roblox.com/v1/groups/icons?groupIds={}&size=150x150&format=Png&isCircular=false", join_ids(batch));
+            if let Ok(body) = self.get(&url, None, THUMB_TTL).await
+                && let Ok(icons) = parse::thumbnails(&body)
+            {
+                for g in &mut groups {
+                    if let Some(u) = icons.get(&g.id) {
+                        g.icon_url = Some(u.clone());
+                    }
+                }
+            }
+        }
+        Ok(groups)
+    }
+
     /// A group and, when signed in, your rank in it.
     pub async fn group(&self, cookie: Option<&str>, user_id: Option<u64>, group_id: u64) -> Result<GroupInfo> {
         let mut info = parse::group_info(&self.get(&format!("https://groups.roblox.com/v1/groups/{group_id}"), None, LIST_TTL).await?)?;
@@ -849,5 +894,19 @@ mod tests {
         assert_eq!(backoff(2, None), Duration::from_secs(2));
         assert_eq!(backoff(0, Some(3)), Duration::from_secs(3));
         assert_eq!(backoff(0, Some(600)), Duration::from_secs(5));
+    }
+
+    /// Talks to the real Roblox API: `cargo test live_profile -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_profile_games_and_groups() {
+        let api = Client::new();
+        let p = api.profile(None, 1).await.unwrap();
+        assert_eq!(p.name, "Roblox");
+        assert!(p.followers.unwrap_or(0) > 1000, "{p:?}");
+        let games = api.created_games(1).await.unwrap();
+        assert!(!games.is_empty());
+        let groups = api.user_groups(1).await.unwrap();
+        println!("followers {:?}, {} games, {} groups, first group {:?}", p.followers, games.len(), groups.len(), groups.first());
     }
 }

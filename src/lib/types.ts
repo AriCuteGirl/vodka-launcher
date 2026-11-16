@@ -249,6 +249,8 @@ export interface LaunchOptions {
   presentMode: string | null;
   multithreadedRendering: boolean | null;
   gamemode: string | null;
+  /** Windows: the graphics API Roblox should prefer. */
+  renderer: string | null;
   memoryLimitMb: number | null;
   holdUpdates: boolean | null;
   /** Start the game again by itself after a crash or disconnect. */
@@ -258,6 +260,7 @@ export interface LaunchOptions {
 
 export const NO_OPTIONS: LaunchOptions = {
   fps: null,
+  renderer: null,
   backend: null,
   vsync: null,
   presentMode: null,
@@ -460,4 +463,113 @@ export interface GroupInfo {
   publicEntry: boolean;
   /** Your rank's name when you're in it. */
   myRole: string | null;
+}
+
+/** Someone's Roblox profile. */
+export interface Profile {
+  id: number;
+  name: string;
+  displayName: string;
+  description: string;
+  /** ISO date the account was made. */
+  created: string | null;
+  verified: boolean;
+  banned: boolean;
+  avatarUrl: string | null;
+  friends: number | null;
+  followers: number | null;
+  following: number | null;
+  /** What they're doing now; only when signed in. */
+  presence: Presence | null;
+}
+
+/** A group someone is in, with their rank. */
+export interface UserGroup {
+  id: number;
+  name: string;
+  members: number;
+  verified: boolean;
+  role: string;
+  iconUrl: string | null;
+}
+
+/** One thing in Luduvo's store. */
+export interface LuduvoItem {
+  id: number;
+  name: string;
+  description: string;
+  creator: string;
+  /** C$; null when it isn't for sale. */
+  price: number | null;
+  limited: boolean;
+  assetType: string;
+  slot: string;
+  pictureUrl: string | null;
+  sales: number;
+  likes: number;
+  dislikes: number;
+  owners: number | null;
+  /** 1 liked, -1 disliked, 0 not rated. */
+  myVote: number;
+  /** Unix seconds the sale ends, for timed items. */
+  expiresAt: number | null;
+}
+
+export interface LuduvoCategory {
+  assetType: string;
+  slot: string;
+  name: string;
+}
+
+/** Something you own or wear on Luduvo. */
+export interface LuduvoOwned {
+  id: number;
+  variant: number;
+  name: string;
+  assetType: string;
+  slot: string;
+  pictureUrl: string | null;
+}
+
+export interface LuduvoAvatar {
+  pictureUrl: string | null;
+  wearing: LuduvoOwned[];
+}
+
+export interface LuduvoOutfit {
+  id: number;
+  name: string;
+  pictureUrl: string | null;
+}
+
+/** Someone's Luduvo profile. */
+export interface LuduvoProfile {
+  id: number;
+  name: string;
+  displayName: string;
+  bio: string;
+  status: string;
+  tier: string;
+  memberSince: number | null;
+  lastActive: number | null;
+  friends: number | null;
+  places: number | null;
+  items: number | null;
+  friendsHidden: boolean;
+  badges: string[];
+  wearing: LuduvoOwned[];
+  headshotUrl: string | null;
+  pictureUrl: string | null;
+  state: string;
+  placeId: number | null;
+  placeTitle: string | null;
+  joinable: boolean;
+}
+
+export interface LuduvoGroup {
+  id: number;
+  name: string;
+  members: number;
+  role: string;
+  iconUrl: string | null;
 }

@@ -8,7 +8,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Friend, Place, PlaceDetails, Rating, Server, Shelf, User};
+pub use parse::{Friend, Group, OwnedItem, Outfit, Profile, Place, PlaceDetails, Rating, Server, Shelf, StoreCategory, StoreItem, User};
 use reqwest::{Method, StatusCode, Url, header};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -452,12 +452,197 @@ impl Client {
         join_link(&answer)
     }
 
+    pub async fn store_categories(&self) -> Result<Vec<StoreCategory>> {
+        Ok(parse::store_categories(&self.public("/store/categories").await?))
+    }
+
+    /// One page of the store. `sort` is relevance, popular, newest or algorithm.
+    pub async fn store(&self, query: &str, asset_type: &str, slot: &str, sort: &str, offset: u64) -> Result<(Vec<StoreItem>, u64)> {
+        let mut url = Url::parse(&format!("{API}/store")).expect("static url");
+        {
+            let mut q = url.query_pairs_mut();
+            let text: String = query.trim().chars().take(200).collect();
+            if !text.is_empty() {
+                q.append_pair("q", &text);
+            }
+            if !asset_type.is_empty() {
+                q.append_pair("asset_type", asset_type);
+            }
+            if !slot.is_empty() {
+                q.append_pair("slot", slot);
+            }
+            let sort = if ["relevance", "popular", "newest", "algorithm"].contains(&sort) { sort } else { "relevance" };
+            q.append_pair("sort", sort).append_pair("limit", "50").append_pair("offset", &offset.to_string());
+        }
+        let path = format!("/store?{}", url.query().unwrap_or_default());
+        Ok(parse::store_page(&self.public(&path).await?))
+    }
+
+    /// An item's own page; signed in, it also has your like or dislike.
+    pub async fn store_item(&self, id: u64) -> Result<StoreItem> {
+        let path = format!("/store/{id}");
+        let json = if self.has_session().await? { self.authed(Method::GET, &path).await? } else { self.public(&path).await? };
+        parse::store_item(&json).ok_or_else(|| AppError::Other("Luduvo doesn't know that item.".into()))
+    }
+
+    pub async fn rate_item(&self, id: u64, value: i64) -> Result<StoreItem> {
+        self.authed_with(Method::POST, &format!("/store/{id}/rate"), Some(&serde_json::json!({ "value": value.signum() }))).await?;
+        self.store_item(id).await
+    }
+
+    pub async fn favorite_item(&self, id: u64, on: bool) -> Result<()> {
+        self.authed(if on { Method::POST } else { Method::DELETE }, &format!("/items/{id}/favorite")).await?;
+        Ok(())
+    }
+
+    /// Buys an item at exactly `agreed_price` C$. Luduvo refuses if the price changed; if it wants a captcha, the
+    /// person is sent to luduvo.com instead.
+    pub async fn buy_item(&self, id: u64, agreed_price: u64) -> Result<()> {
+        let current = self.store_item(id).await?;
+        if current.price != Some(agreed_price) {
+            return Err(AppError::Other("The price changed since you looked. Check it and confirm again.".into()));
+        }
+        match self.authed_with(Method::POST, &format!("/store/{id}/buy"), Some(&serde_json::json!({ "expected_price": agreed_price }))).await {
+            Ok(_) => Ok(()),
+            Err(AppError::Other(m)) if m.to_lowercase().contains("captcha") => {
+                Err(AppError::Other("Luduvo wants a captcha for this purchase. Buy it on luduvo.com instead.".into()))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A full-body picture of someone's avatar. Luduvo answers with a redirect to the picture on its asset host.
+    pub async fn avatar_picture(&self, user_id: u64) -> Result<Option<String>> {
+        let url = Url::parse(&format!("{API}/users/{user_id}/avatar/full-body")).expect("static url");
+        check_url(&url)?;
+        let res = self.http.get(url).send().await.map_err(|e| AppError::Other(format!("Couldn't talk to Luduvo: {e}")))?;
+        let to = res.headers().get(header::LOCATION).and_then(|v| v.to_str().ok()).map(str::to_owned);
+        Ok(parse::asset_url(to.map(serde_json::Value::String).as_ref()))
+    }
+
+    /// Someone's profile, with their avatar picture and what they're doing. Public.
+    pub async fn profile(&self, user_id: u64) -> Result<Profile> {
+        let mut p = parse::profile(&self.public(&format!("/users/{user_id}/profile")).await?).ok_or_else(|| AppError::Other("Luduvo doesn't know that person.".into()))?;
+        p.picture_url = self.avatar_picture(user_id).await.ok().flatten();
+        if let Ok(json) = self.public(&format!("/users/{user_id}/presence")).await {
+            #[cfg(debug_assertions)]
+            eprintln!("[luduvo] single presence shape: {}", parse::shape(&json));
+            let pr = parse::single_presence(&json);
+            p.state = pr.state;
+            p.place_id = pr.place_id;
+            p.place_title = pr.place_title;
+            p.joinable = pr.joinable;
+        }
+        Ok(p)
+    }
+
+    pub async fn user_friends(&self, user_id: u64) -> Result<Vec<Friend>> {
+        Ok(parse::friend_list(&self.public(&format!("/users/{user_id}/friends?limit=200&offset=0")).await?))
+    }
+
+    pub async fn user_places(&self, user_id: u64) -> Result<Vec<Place>> {
+        Ok(parse::place_list(&self.public(&format!("/users/{user_id}/places?limit=50&offset=0")).await?))
+    }
+
+    pub async fn user_groups(&self, user_id: u64) -> Result<Vec<Group>> {
+        let json = self.public(&format!("/users/{user_id}/groups?limit=50&offset=0")).await?;
+        #[cfg(debug_assertions)]
+        eprintln!("[luduvo] user groups shape: {}", parse::shape(&json));
+        Ok(parse::groups(&json))
+    }
+
+    /// What you're wearing now.
+    pub async fn equipped(&self) -> Result<Vec<OwnedItem>> {
+        // `/me/equipped` only takes writes; the website reads your look from your profile.
+        let me = self.me().await?;
+        let json = self.authed(Method::GET, &format!("/users/{}/profile", me.id)).await?;
+        Ok(parse::owned_list(&json))
+    }
+
+    /// Wears exactly `items` (item id and variant), replacing what you had on.
+    pub async fn set_equipped(&self, items: &[(u64, u64)]) -> Result<()> {
+        let list: Vec<serde_json::Value> = items.iter().map(|(id, variant)| serde_json::json!({ "item_id": id, "variant_index": variant })).collect();
+        self.authed_with(Method::PUT, "/me/equipped", Some(&serde_json::json!({ "items": list }))).await?;
+        Ok(())
+    }
+
+    /// One page of what you own, optionally one kind of item.
+    pub async fn inventory(&self, asset_type: &str, slot: &str, offset: u64) -> Result<Vec<OwnedItem>> {
+        let mut url = Url::parse(&format!("{API}/me/inventory")).expect("static url");
+        {
+            let mut q = url.query_pairs_mut();
+            if !asset_type.is_empty() {
+                q.append_pair("asset_type", asset_type);
+            }
+            if !slot.is_empty() {
+                q.append_pair("slot", slot);
+            }
+            q.append_pair("limit", "100").append_pair("offset", &offset.to_string());
+        }
+        let json = self.authed(Method::GET, &format!("/me/inventory?{}", url.query().unwrap_or_default())).await?;
+        #[cfg(debug_assertions)]
+        eprintln!("[luduvo] inventory shape: {}", parse::shape(&json));
+        Ok(parse::owned_list(&json))
+    }
+
+    pub async fn outfits(&self) -> Result<Vec<Outfit>> {
+        Ok(parse::outfits(&self.authed(Method::GET, "/me/outfits").await?))
+    }
+
+    pub async fn wear_outfit(&self, id: u64) -> Result<()> {
+        self.authed(Method::POST, &format!("/me/outfits/{id}/wear")).await?;
+        Ok(())
+    }
+
+    /// Saves what you're wearing as a new outfit.
+    pub async fn save_outfit(&self, name: &str) -> Result<()> {
+        let name: String = name.trim().chars().take(50).collect();
+        if name.is_empty() {
+            return Err(AppError::Other("Give the outfit a name first.".into()));
+        }
+        self.authed_with(Method::POST, "/me/outfits", Some(&serde_json::json!({ "name": name }))).await?;
+        Ok(())
+    }
+
+    pub async fn delete_outfit(&self, id: u64) -> Result<()> {
+        self.authed(Method::DELETE, &format!("/me/outfits/{id}")).await?;
+        Ok(())
+    }
+
+    /// Sends a friend request by username.
+    pub async fn add_friend(&self, username: &str) -> Result<()> {
+        let name = username.trim().trim_start_matches('@');
+        if name.is_empty() || name.len() > 40 || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.') {
+            return Err(AppError::Other("That doesn't look like a Luduvo username.".into()));
+        }
+        self.authed(Method::POST, &format!("/friends/by-username/{name}/request")).await?;
+        Ok(())
+    }
+
+    pub async fn remove_friend(&self, user_id: u64) -> Result<()> {
+        self.authed(Method::DELETE, &format!("/friends/{user_id}")).await?;
+        Ok(())
+    }
+
     /// Your friends with what each is doing, people in a game first, then online, then the rest.
     pub async fn friends(&self) -> Result<Vec<Friend>> {
         let json = self.authed(Method::GET, "/me/friends?limit=200&offset=0").await?;
         #[cfg(debug_assertions)]
-        eprintln!("[luduvo] friends shape: {}", parse::shape(&json));
+        eprintln!(
+            "[luduvo] friends shape: {}; hidden={:?} total={:?}",
+            parse::shape(&json),
+            json.get("hidden"),
+            json.get("total")
+        );
         let mut friends = parse::friend_list(&json);
+        // The website also lists friends through the public profile route; use it when "my friends" comes back empty.
+        if friends.is_empty() {
+            let me = self.me().await?;
+            let other = self.authed(Method::GET, &format!("/users/{}/friends?limit=200&offset=0", me.id)).await?;
+            #[cfg(debug_assertions)]
+            eprintln!("[luduvo] /users/me/friends shape: {}; total={:?}", parse::shape(&other), other.get("total"));
+            friends = parse::friend_list(&other);
+        }
         let ids: Vec<u64> = friends.iter().map(|f| f.id).collect();
         let mut presence = std::collections::HashMap::new();
         for chunk in ids.chunks(100) {
@@ -730,6 +915,20 @@ mod tests {
         assert!(found.iter().any(|p| p.title == "snow battle"), "{found:?}");
         assert!(client.recently_played().await.is_err() || client.has_session().await.unwrap());
         println!("{} shelves; first: {:?}", shelves.len(), shelves[0].places.first());
+        let cats = client.store_categories().await.unwrap();
+        let (items, total) = client.store("", "", "", "popular", 0).await.unwrap();
+        assert!(!cats.is_empty() && !items.is_empty() && total > 0);
+        let hats = client.store("", "accessory", "hat", "newest", 0).await.unwrap().0;
+        assert!(hats.iter().all(|i| i.slot == "hat"), "{hats:?}");
+        let one = client.store_item(items[0].id).await.unwrap();
+        let picture = client.avatar_picture(1).await.unwrap();
+        let prof = client.profile(1).await.unwrap();
+        assert_eq!(prof.id, 1);
+        assert!(prof.picture_url.is_some() && !prof.wearing.is_empty(), "{prof:?}");
+        let _ = (client.user_friends(1).await.unwrap(), client.user_places(1).await.unwrap(), client.user_groups(1).await.unwrap());
+        println!("profile: {} ({}), state {}, {} worn, badges {:?}", prof.display_name, prof.name, prof.state, prof.wearing.len(), prof.badges);
+        assert!(picture.as_deref().is_some_and(|u| u.starts_with("https://assets.luduvo.com/full_body/")), "{picture:?}");
+        println!("{} categories, {total} items; popular: {} ({:?} C$, {} sold, {:?} owners)", cats.len(), one.name, one.price, one.sales, one.owners);
     }
 
     #[test]

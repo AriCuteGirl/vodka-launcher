@@ -12,6 +12,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
+  import { api } from "$lib/api";
   import { acceptMultiInstance, app, boot, MAX_INSTANCES, onWindows, play } from "$lib/state.svelte";
   import { page } from "$app/state";
   import { gameOf } from "$lib/games";
@@ -19,6 +20,22 @@
 
   let { children } = $props();
   onMount(boot);
+
+  // Errors in the window don't reach the terminal on their own; pass them on so `vodka-launcher` run from a terminal
+  // shows what went wrong.
+  onMount(() => {
+    const onError = (e: ErrorEvent) => void api.uiLog("error", `${e.message} at ${e.filename}:${e.lineno} (page ${location.pathname})`);
+    const onReject = (e: PromiseRejectionEvent) => {
+      const r = e.reason;
+      void api.uiLog("error", `unhandled: ${r instanceof Error ? `${r.message}\n${r.stack ?? ""}` : JSON.stringify(r)} (page ${location.pathname})`);
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onReject);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onReject);
+    };
+  });
 
   const game = $derived(gameOf(page.url.pathname));
   // The accent colour follows the game; dialogs and toasts live outside the shell, so it goes on the root.

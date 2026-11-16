@@ -8,6 +8,8 @@ pub const BACKENDS: [&str; 4] = ["direct-vulkan", "opengl", "system", "angle-vul
 pub const VSYNC: [&str; 3] = ["auto", "on", "off"];
 pub const PRESENT_MODES: [&str; 4] = ["auto", "fifo", "mailbox", "immediate"];
 pub const GAMEMODE: [&str; 3] = ["auto", "on", "off"];
+/// Windows only: which graphics API the Roblox client prefers.
+pub const RENDERERS: [&str; 4] = ["auto", "d3d11", "vulkan", "opengl"];
 const MAX_FLAGS: usize = 200;
 /// Roblox sits around 1.5 GB and spikes well above 2 GB when a lot loads at once (a 2 GB
 /// limit closed a real session mid-trade). Mocktail closes the game when the limit is
@@ -28,6 +30,8 @@ pub struct LaunchOptions {
     pub present_mode: Option<String>,
     pub multithreaded_rendering: Option<bool>,
     pub gamemode: Option<String>,
+    /// Windows: the graphics API Roblox should prefer (`auto`, `d3d11`, `vulkan`, `opengl`).
+    pub renderer: Option<String>,
     /// Megabytes. 0 turns the cap off.
     pub memory_limit_mb: Option<u32>,
     /// Keep the current Roblox client instead of updating on launch.
@@ -100,6 +104,7 @@ pub fn validate(options: &LaunchOptions) -> Result<LaunchOptions, String> {
     one_of("VSync", &options.vsync, &VSYNC)?;
     one_of("Present mode", &options.present_mode, &PRESENT_MODES)?;
     one_of("GameMode", &options.gamemode, &GAMEMODE)?;
+    one_of("Graphics API", &options.renderer, &RENDERERS)?;
     if let Some(mb) = options.memory_limit_mb {
         if mb != 0 && !(MIN_MEMORY_CAP_MB..=262_144).contains(&mb) {
             return Err(format!(
@@ -133,6 +138,7 @@ pub fn effective(defaults: &LaunchOptions, account: Option<&LaunchOptions>) -> L
         present_mode: a.present_mode.clone().or_else(|| defaults.present_mode.clone()),
         multithreaded_rendering: a.multithreaded_rendering.or(defaults.multithreaded_rendering),
         gamemode: a.gamemode.clone().or_else(|| defaults.gamemode.clone()),
+        renderer: a.renderer.clone().or_else(|| defaults.renderer.clone()),
         memory_limit_mb: a.memory_limit_mb.or(defaults.memory_limit_mb),
         hold_updates: a.hold_updates.or(defaults.hold_updates),
         auto_rejoin: a.auto_rejoin.or(defaults.auto_rejoin),
@@ -166,6 +172,8 @@ pub fn to_env(options: &LaunchOptions) -> Vec<(&'static str, String)> {
     put("MOCKTAIL_PRESENT_MODE", options.present_mode.clone());
     put("MOCKTAIL_MULTITHREADED_RENDERING", options.multithreaded_rendering.map(|on| if on { "1" } else { "0" }.to_owned()));
     put("MOCKTAIL_GAMEMODE", options.gamemode.clone());
+    // Read by the Windows version only, which turns it into Roblox's renderer flags.
+    put("VODKA_WINDOWS_RENDERER", options.renderer.clone());
     put("MOCKTAIL_MEMORY_LIMIT_MB", options.memory_limit_mb.map(|mb| mb.to_string()));
     put("MOCKTAIL_SKIP_UPDATE_CHECK", options.hold_updates.filter(|hold| *hold).map(|_| "1".to_owned()));
     if !options.fflags.is_empty() {

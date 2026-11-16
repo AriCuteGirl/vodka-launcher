@@ -14,7 +14,7 @@ export const PRESETS: Preset[] = [
   {
     id: "uncapped",
     name: "Uncapped FPS",
-    description: "Removes the frame cap. Mocktail tops out at 240 FPS.",
+    description: "Removes the frame cap (Mocktail tops out at 240 FPS on Linux).",
     verified: true,
     options: { fps: "unlimited" },
   },

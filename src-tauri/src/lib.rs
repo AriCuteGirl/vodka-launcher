@@ -13,6 +13,9 @@ mod mocktail;
 mod roblox_api;
 mod settings;
 mod tweaks;
+// Used by the Windows build; its logic is tested everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod winclient;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod windows_player;
 
@@ -454,6 +457,14 @@ async fn refresh_instance_games(app: AppHandle, state: State<'_, AppState>) -> R
         changed = true;
     }
     #[cfg(windows)]
+    for name in instances::take_over_memory(&state.instances) {
+        let _ = tauri::Emitter::emit(
+            &app,
+            "instances://error",
+            AppError::Other(format!("Vodka closed {name}: it went over its memory safety limit. Raise or turn off the limit in Settings.")),
+        );
+    }
+    #[cfg(windows)]
     for name in instances::take_given_up(&state.instances) {
         let _ = tauri::Emitter::emit(
             &app,
@@ -475,6 +486,35 @@ async fn open_private_server_page(app: AppHandle, place_id: u64, name: String) -
     let url = tauri::Url::parse(&format!("https://www.roblox.com/games/{place_id}#!/game-instances")).map_err(|_| AppError::BlockedUrl)?;
     let title: String = format!("Private server · {name}").chars().take(80).collect();
     accounts::open_roblox_page(&app, &cookie, url, &title, false, None).map(|_| ())
+}
+
+/// Someone's profile. Works signed out too; signed in it also says what they're doing.
+#[tauri::command]
+async fn user_profile(app: AppHandle, state: State<'_, AppState>, user_id: u64) -> Result<roblox_api::Profile> {
+    let cookie = active_cookie(&app).await.ok().map(|(_, c)| c);
+    state.api.profile(cookie.as_deref(), user_id).await
+}
+
+#[tauri::command]
+async fn user_friends(app: AppHandle, state: State<'_, AppState>, user_id: u64) -> Result<Vec<Person>> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.friends(&cookie, user_id).await
+}
+
+#[tauri::command]
+async fn user_favorites(app: AppHandle, state: State<'_, AppState>, user_id: u64) -> Result<Vec<Game>> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.favorites(&cookie, user_id).await
+}
+
+#[tauri::command]
+async fn user_games(state: State<'_, AppState>, user_id: u64) -> Result<Vec<Game>> {
+    state.api.created_games(user_id).await
+}
+
+#[tauri::command]
+async fn user_groups(state: State<'_, AppState>, user_id: u64) -> Result<Vec<roblox_api::UserGroup>> {
+    state.api.user_groups(user_id).await
 }
 
 #[tauri::command]
@@ -1189,6 +1229,139 @@ async fn luduvo_play_server(app: AppHandle, state: State<'_, AppState>, server_i
 }
 
 #[tauri::command]
+async fn luduvo_store_categories(state: State<'_, AppState>) -> Result<Vec<luduvo::StoreCategory>> {
+    state.luduvo.store_categories().await
+}
+
+#[derive(Serialize)]
+struct StorePage {
+    items: Vec<luduvo::StoreItem>,
+    total: u64,
+}
+
+#[tauri::command]
+async fn luduvo_store(state: State<'_, AppState>, query: String, asset_type: String, slot: String, sort: String, offset: u64) -> Result<StorePage> {
+    let (items, total) = state.luduvo.store(&query, &asset_type, &slot, &sort, offset).await?;
+    Ok(StorePage { items, total })
+}
+
+#[tauri::command]
+async fn luduvo_store_item(state: State<'_, AppState>, item_id: u64) -> Result<luduvo::StoreItem> {
+    state.luduvo.store_item(item_id).await
+}
+
+#[tauri::command]
+async fn luduvo_rate_item(state: State<'_, AppState>, item_id: u64, value: i64) -> Result<luduvo::StoreItem> {
+    state.luduvo.rate_item(item_id, value).await
+}
+
+#[tauri::command]
+async fn luduvo_favorite_item(state: State<'_, AppState>, item_id: u64, on: bool) -> Result<()> {
+    state.luduvo.favorite_item(item_id, on).await
+}
+
+/// Buys a store item. `agreed_price` is the price the person confirmed in Vodka's dialog.
+#[tauri::command]
+async fn luduvo_buy_item(state: State<'_, AppState>, item_id: u64, agreed_price: u64) -> Result<Option<i64>> {
+    state.luduvo.buy_item(item_id, agreed_price).await?;
+    state.luduvo.balance().await
+}
+
+#[tauri::command]
+async fn luduvo_add_friend(state: State<'_, AppState>, username: String) -> Result<()> {
+    state.luduvo.add_friend(&username).await
+}
+
+#[tauri::command]
+async fn luduvo_remove_friend(state: State<'_, AppState>, user_id: u64) -> Result<()> {
+    state.luduvo.remove_friend(user_id).await
+}
+
+/// Your avatar picture and what you're wearing.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LuduvoAvatar {
+    picture_url: Option<String>,
+    wearing: Vec<luduvo::OwnedItem>,
+}
+
+#[tauri::command]
+async fn luduvo_avatar(state: State<'_, AppState>) -> Result<LuduvoAvatar> {
+    let me = state.luduvo.me().await?;
+    let wearing = state.luduvo.equipped().await?;
+    let picture_url = state.luduvo.avatar_picture(me.id).await.ok().flatten();
+    Ok(LuduvoAvatar { picture_url, wearing })
+}
+
+#[tauri::command]
+async fn luduvo_set_wearing(state: State<'_, AppState>, items: Vec<(u64, u64)>) -> Result<LuduvoAvatar> {
+    state.luduvo.set_equipped(&items).await?;
+    let me = state.luduvo.me().await?;
+    // The picture is redrawn by Luduvo after a change; ask for it after a short pause.
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    Ok(LuduvoAvatar { picture_url: state.luduvo.avatar_picture(me.id).await.ok().flatten(), wearing: state.luduvo.equipped().await? })
+}
+
+#[tauri::command]
+async fn luduvo_inventory(state: State<'_, AppState>, asset_type: String, slot: String, offset: u64) -> Result<Vec<luduvo::OwnedItem>> {
+    state.luduvo.inventory(&asset_type, &slot, offset).await
+}
+
+#[tauri::command]
+async fn luduvo_outfits(state: State<'_, AppState>) -> Result<Vec<luduvo::Outfit>> {
+    state.luduvo.outfits().await
+}
+
+#[tauri::command]
+async fn luduvo_wear_outfit(state: State<'_, AppState>, outfit_id: u64) -> Result<LuduvoAvatar> {
+    state.luduvo.wear_outfit(outfit_id).await?;
+    let me = state.luduvo.me().await?;
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    Ok(LuduvoAvatar { picture_url: state.luduvo.avatar_picture(me.id).await.ok().flatten(), wearing: state.luduvo.equipped().await? })
+}
+
+#[tauri::command]
+async fn luduvo_save_outfit(state: State<'_, AppState>, name: String) -> Result<Vec<luduvo::Outfit>> {
+    state.luduvo.save_outfit(&name).await?;
+    state.luduvo.outfits().await
+}
+
+#[tauri::command]
+async fn luduvo_delete_outfit(state: State<'_, AppState>, outfit_id: u64) -> Result<Vec<luduvo::Outfit>> {
+    state.luduvo.delete_outfit(outfit_id).await?;
+    state.luduvo.outfits().await
+}
+
+/// A line from the window (an error, a failed page switch) written to Vodka's terminal output, so problems in the
+/// installed app can be seen by running `vodka-launcher` from a terminal.
+#[tauri::command]
+fn ui_log(level: String, message: String) {
+    let level: String = level.chars().filter(char::is_ascii_alphabetic).take(8).collect();
+    let message: String = message.chars().filter(|c| !c.is_control() || *c == ' ').take(2000).collect();
+    eprintln!("[ui {level}] {message}");
+}
+
+#[tauri::command]
+async fn luduvo_profile(state: State<'_, AppState>, user_id: u64) -> Result<luduvo::Profile> {
+    state.luduvo.profile(user_id).await
+}
+
+#[tauri::command]
+async fn luduvo_user_friends(state: State<'_, AppState>, user_id: u64) -> Result<Vec<luduvo::Friend>> {
+    state.luduvo.user_friends(user_id).await
+}
+
+#[tauri::command]
+async fn luduvo_user_places(state: State<'_, AppState>, user_id: u64) -> Result<Vec<luduvo::Place>> {
+    state.luduvo.user_places(user_id).await
+}
+
+#[tauri::command]
+async fn luduvo_user_groups(state: State<'_, AppState>, user_id: u64) -> Result<Vec<luduvo::Group>> {
+    state.luduvo.user_groups(user_id).await
+}
+
+#[tauri::command]
 async fn luduvo_friends(state: State<'_, AppState>) -> Result<Vec<luduvo::Friend>> {
     state.luduvo.friends().await
 }
@@ -1267,6 +1440,11 @@ pub fn run() {
             owned_servers,
             private_server_offer,
             roblox_group,
+            user_profile,
+            user_friends,
+            user_favorites,
+            user_games,
+            user_groups,
             join_roblox_group,
             open_group_page,
             create_private_server,
@@ -1328,6 +1506,26 @@ pub fn run() {
             luduvo_play_private,
             open_external,
             luduvo_play_server,
+            luduvo_store_categories,
+            luduvo_store,
+            luduvo_store_item,
+            luduvo_rate_item,
+            luduvo_favorite_item,
+            luduvo_buy_item,
+            luduvo_add_friend,
+            luduvo_remove_friend,
+            luduvo_avatar,
+            luduvo_set_wearing,
+            luduvo_inventory,
+            luduvo_outfits,
+            luduvo_wear_outfit,
+            luduvo_save_outfit,
+            luduvo_delete_outfit,
+            ui_log,
+            luduvo_profile,
+            luduvo_user_friends,
+            luduvo_user_places,
+            luduvo_user_groups,
             luduvo_friends,
             luduvo_friend_requests,
             luduvo_answer_request,
