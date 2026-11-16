@@ -161,9 +161,9 @@
   {/if}
 
   {#snippet actions()}
-    <Button onclick={close}>Cancel</Button>
+    <Button onclick={close}>Close</Button>
     <Button variant="primary" icon="play" disabled={chosen.length === 0 || !app.mocktail?.installed} onclick={start}>
-      {chosen.length > 1 ? `Start for ${chosen.length} accounts` : "Start"}
+      {chosen.length > 1 ? `Play on ${chosen.length} accounts` : "Play"}
     </Button>
   {/snippet}
 </Modal>

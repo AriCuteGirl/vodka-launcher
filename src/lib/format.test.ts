@@ -9,6 +9,7 @@ describe("compact", () => {
     expect(compact(5766)).toBe("5.8K");
     expect(compact(149534)).toBe("150K");
     expect(compact(2_100_000)).toBe("2.1M");
+    expect(compact(65_523_923_109)).toBe("65.5B");
   });
 });
 

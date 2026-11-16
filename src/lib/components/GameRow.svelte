@@ -1,6 +1,7 @@
 <script lang="ts">
   import { matches } from "$lib/format";
-  import { app, loadHome, openLaunchDialog, phaseOf, play, signIn } from "$lib/state.svelte";
+  import { goto } from "$app/navigation";
+  import { app, loadHome, phaseOf, play, signIn } from "$lib/state.svelte";
   import type { Game, Loadable } from "$lib/types";
   import Button from "./Button.svelte";
   import GameTile from "./GameTile.svelte";
@@ -85,7 +86,7 @@
   {:else}
     <div class="grid" class:wrap bind:this={scroller}>
       {#each visible as game (game.universeId)}
-        <GameTile {game} onplay={play} onservers={app.account ? openLaunchDialog : undefined} disabled={!canPlay} phase={phaseOf(game)} />
+        <GameTile {game} onplay={play} onopen={(g) => goto(`/games/${g.universeId}`)} disabled={!canPlay} phase={phaseOf(game)} />
       {/each}
     </div>
   {/if}
@@ -96,6 +97,9 @@
     display: grid;
     gap: var(--s-3);
     min-width: 0;
+    /* Rows scrolled out of view aren't laid out or painted; Luduvo's home has hundreds of tiles. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 230px;
   }
   header {
     display: flex;

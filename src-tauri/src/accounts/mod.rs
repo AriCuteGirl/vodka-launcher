@@ -137,6 +137,132 @@ pub fn open_login(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
+pub const ROBLOX_PAGE_WINDOW: &str = "roblox-page";
+
+/// Runs on a group's page in the hidden Roblox window: presses its "Join Community" button once, so Roblox's own
+/// page does the join, including the human check it runs in the background.
+pub const JOIN_GROUP_SCRIPT: &str = r#"(() => {
+  if (!/^(www\.)?roblox\.com$/.test(location.hostname) || !/^\/(communities|groups)\//.test(location.pathname)) return;
+  let pressed = false;
+  const started = Date.now();
+  const tick = setInterval(() => {
+    if (pressed || Date.now() - started > 30000) return clearInterval(tick);
+    const button = [...document.querySelectorAll("button")].find((b) =>
+      /^\s*join (community|group)\s*$/i.test(b.textContent || "") && !b.disabled
+    );
+    if (button) {
+      pressed = true;
+      button.click();
+    }
+  }, 500);
+})();"#;
+
+/// The Roblox hosts roblox.com's own pages call while signed in.
+const ROBLOX_HOSTS: &[&str] = &[
+    "roblox.com",
+    "www.roblox.com",
+    "web.roblox.com",
+    "apis.roblox.com",
+    "auth.roblox.com",
+    "users.roblox.com",
+    "games.roblox.com",
+    "gamejoin.roblox.com",
+    "economy.roblox.com",
+    "billing.roblox.com",
+    "catalog.roblox.com",
+    "friends.roblox.com",
+    "presence.roblox.com",
+    "thumbnails.roblox.com",
+    "avatar.roblox.com",
+    "groups.roblox.com",
+    "badges.roblox.com",
+    "inventory.roblox.com",
+    "trades.roblox.com",
+    "accountsettings.roblox.com",
+    "accountinformation.roblox.com",
+    "premiumfeatures.roblox.com",
+    "privatemessages.roblox.com",
+    "notifications.roblox.com",
+    "realtime-signalr.roblox.com",
+    "twostepverification.roblox.com",
+    "develop.roblox.com",
+    "followings.roblox.com",
+    "voice.roblox.com",
+    "metrics.roblox.com",
+    "ecsv2.roblox.com",
+    "locale.roblox.com",
+    "translations.roblox.com",
+    "contacts.roblox.com",
+    "chat.roblox.com",
+];
+
+/// Hosts the in-app Roblox window may show: Roblox itself and the captcha Roblox uses.
+pub fn page_host_allowed(url: &Url) -> bool {
+    if url.scheme() == "about" {
+        return true;
+    }
+    let host = url.host_str().unwrap_or_default();
+    url.scheme() == "https"
+        && (host == "roblox.com"
+            || host.ends_with(".roblox.com")
+            || host.ends_with(".rbxcdn.com")
+            || host == "arkoselabs.com"
+            || host.ends_with(".arkoselabs.com")
+            || host.ends_with(".arkoselabs.roblox.com"))
+}
+
+/// Opens a roblox.com page in a private window inside Vodka, signed in as `cookie`'s account, so Roblox's own page
+/// can do what Vodka can't (a purchase with its captcha and price confirmation). It can only go to Roblox and its
+/// captcha, keeps nothing on disk, and is wiped when it closes.
+/// With `hidden`, the window starts invisible (for doing something on the page in the background) and `script`
+/// runs on each page it loads.
+pub fn open_roblox_page(app: &AppHandle, cookie: &str, url: Url, title: &str, hidden: bool, script: Option<&str>) -> Result<tauri::WebviewWindow> {
+    if !valid_cookie(cookie) || url.scheme() != "https" || !matches!(url.host_str(), Some("www.roblox.com")) {
+        return Err(AppError::BlockedUrl);
+    }
+    if let Some(existing) = app.get_webview_window(ROBLOX_PAGE_WINDOW) {
+        let _ = existing.close();
+    }
+    let blank = Url::parse("about:blank").expect("static url");
+    let builder = WebviewWindowBuilder::new(app, ROBLOX_PAGE_WINDOW, WebviewUrl::External(blank))
+        .title(title)
+        .inner_size(1000.0, 780.0)
+        .incognito(true)
+        .visible(!hidden)
+        .on_navigation(page_host_allowed);
+    let builder = match script {
+        Some(js) => builder.initialization_script(js),
+        None => builder,
+    };
+    let window = builder
+        .build()
+        .map_err(|e| AppError::Other(format!("Could not open the Roblox window: {e}")))?;
+    // The cookie library drops the leading dot from ".roblox.com", which the Linux webview then treats as
+    // "roblox.com only". So the session is handed to each Roblox host the page talks to, one by one.
+    for host in ROBLOX_HOSTS {
+        let session = tauri::webview::cookie::Cookie::build((COOKIE_NAME, cookie.to_owned()))
+            .domain(*host)
+            .path("/")
+            .secure(true)
+            .http_only(true)
+            .build();
+        window.set_cookie(session).map_err(|e| AppError::Other(format!("Could not sign the Roblox window in: {e}")))?;
+    }
+    window.navigate(url).map_err(|e| AppError::Other(format!("Could not open the Roblox page: {e}")))?;
+    let handle = app.clone();
+    let wiped = window.clone();
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::CloseRequested { .. } => {
+            let _ = wiped.clear_all_browsing_data();
+        }
+        tauri::WindowEvent::Destroyed => {
+            let _ = handle.emit("roblox-page://closed", ());
+        }
+        _ => {}
+    });
+    Ok(window)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +282,16 @@ mod tests {
         assert_eq!(entry_name(42), "roblox-session:42");
         assert_ne!(entry_name(1), entry_name(11));
         assert_ne!(entry_name(1), LEGACY_ENTRY);
+    }
+
+    #[test]
+    fn the_roblox_window_stays_on_roblox_and_its_captcha() {
+        let ok = |u: &str| page_host_allowed(&Url::parse(u).unwrap());
+        assert!(ok("https://www.roblox.com/games/1"));
+        assert!(ok("https://roblox-api.arkoselabs.com/v2/x"));
+        assert!(ok("about:blank"));
+        assert!(!ok("http://www.roblox.com/"));
+        assert!(!ok("https://roblox.com.evil.test/"));
+        assert!(!ok("https://evil.test/"));
     }
 }

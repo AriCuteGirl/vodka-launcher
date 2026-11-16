@@ -3,13 +3,15 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Chart, Game, GameStanding, Item, Offer, Outfit, Person, Presence, PrivateServer, Server, User};
+pub use parse::{Chart, Game, GameDetails, GameStanding, GroupInfo, OwnedServer, ServerOffer, Item, Offer, Outfit, Person, Presence, PrivateServer, Server, User};
 use reqwest::{StatusCode, Url, header};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 const RETRIES: u32 = 3;
+/// What `join_group` says when Roblox wants a captcha; the UI matches on it to open Roblox's page instead.
+pub const NEEDS_CAPTCHA: &str = "Roblox wants a captcha to join this group.";
 const LIST_TTL: Duration = Duration::from_secs(60);
 const THUMB_TTL: Duration = Duration::from_secs(600);
 const CHARTS_TTL: Duration = Duration::from_secs(300);
@@ -39,6 +41,19 @@ pub fn backoff(attempt: u32, retry_after: Option<u64>) -> Duration {
 
 fn join_ids(ids: &[u64]) -> String {
     ids.iter().map(u64::to_string).collect::<Vec<_>>().join(",")
+}
+
+/// Roblox's "prove you're human first" answer: an id, a type (`captcha`, ...) and details to solve it with.
+#[derive(Debug, Clone)]
+pub struct Challenge {
+    pub kind: String,
+    pub metadata: serde_json::Value,
+}
+
+enum Posted {
+    Done,
+    Challenge(Challenge),
+    Failed(u16, String),
 }
 
 pub struct Client {
@@ -482,9 +497,170 @@ impl Client {
     }
 
     /// Private servers of a place that this account can join.
+    /// A group and, when signed in, your rank in it.
+    pub async fn group(&self, cookie: Option<&str>, user_id: Option<u64>, group_id: u64) -> Result<GroupInfo> {
+        let mut info = parse::group_info(&self.get(&format!("https://groups.roblox.com/v1/groups/{group_id}"), None, LIST_TTL).await?)?;
+        if let (Some(cookie), Some(user)) = (cookie, user_id) {
+            let roles = self.send(&format!("https://groups.roblox.com/v1/users/{user}/groups/roles"), None, Some(cookie)).await?;
+            info.my_role = parse::role_in(&roles, group_id);
+        }
+        Ok(info)
+    }
+
+    /// Joins a group (or, for a group that approves members, asks to). When Roblox wants a captcha first it
+    /// answers with a challenge; that comes back as `NEEDS_CAPTCHA` (and, in development, gets described in the log).
+    pub async fn join_group(&self, cookie: &str, group_id: u64) -> Result<()> {
+        let url = format!("https://groups.roblox.com/v1/groups/{group_id}/users");
+        match self.post_raw(&url, &serde_json::json!({}), cookie, &[]).await? {
+            Posted::Done => Ok(()),
+            Posted::Challenge(c) => {
+                #[cfg(debug_assertions)]
+                eprintln!("[group] Roblox sent a challenge: type {:?}, metadata fields {}", c.kind, parse::shape_keys(&c.metadata));
+                let _ = c;
+                Err(AppError::Other(NEEDS_CAPTCHA.into()))
+            }
+            Posted::Failed(409, _) => Err(AppError::Other("You're already in this group, or already asked to join.".into())),
+            Posted::Failed(status, body) => Err(AppError::Api(format!("HTTP {status}: {}", body.chars().take(200).collect::<String>()))),
+        }
+    }
+
+    /// A POST that keeps what Roblox says when it refuses: a challenge (captcha and similar) or the status and body.
+    async fn post_raw(&self, url: &str, body: &serde_json::Value, cookie: &str, extra: &[(&str, String)]) -> Result<Posted> {
+        let parsed = Url::parse(url).map_err(|_| AppError::BlockedUrl)?;
+        check_url(&parsed)?;
+        let mut csrf: Option<String> = None;
+        loop {
+            let mut req = self
+                .http
+                .post(parsed.clone())
+                .json(body)
+                .header(header::ACCEPT, "application/json")
+                .header(header::COOKIE, format!(".ROBLOSECURITY={cookie}"));
+            if let Some(token) = &csrf {
+                req = req.header("x-csrf-token", token);
+            }
+            for (k, v) in extra {
+                req = req.header(*k, v);
+            }
+            let res = req.send().await.map_err(|e| {
+                if e.is_connect() || e.is_timeout() { AppError::Offline } else { AppError::Api(e.without_url().to_string()) }
+            })?;
+            let status = res.status();
+            let headers = res.headers().clone();
+            let text = res.text().await.unwrap_or_default();
+            if status == StatusCode::FORBIDDEN && csrf.is_none() {
+                if let Some(token) = headers.get("x-csrf-token").and_then(|v| v.to_str().ok()) {
+                    csrf = Some(token.to_owned());
+                    continue;
+                }
+            }
+            let h = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).map(str::to_owned);
+            if let (Some(_), Some(kind), Some(meta)) = (h("rblx-challenge-id"), h("rblx-challenge-type"), h("rblx-challenge-metadata")) {
+                let metadata = parse::base64_json(&meta).unwrap_or_default();
+                return Ok(Posted::Challenge(Challenge { kind, metadata }));
+            }
+            if status == StatusCode::UNAUTHORIZED {
+                return Err(AppError::SessionExpired);
+            }
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                return Err(AppError::RateLimited);
+            }
+            if status.is_server_error() {
+                return Err(AppError::RobloxDown(status.as_u16()));
+            }
+            if !status.is_success() {
+                return Ok(Posted::Failed(status.as_u16(), text));
+            }
+            return Ok(Posted::Done);
+        }
+    }
+
+    /// Whether you can make a private server for this game, and its monthly price, from the signed-in game page.
+    pub async fn server_offer(&self, cookie: &str, universe_id: u64) -> Result<ServerOffer> {
+        let info = self.get(&format!("https://games.roblox.com/v1/games?universeIds={universe_id}"), None, LIST_TTL).await?;
+        let path = parse::canonical_path(&info).ok_or_else(|| AppError::Api("Roblox didn't say where this game's page is".into()))?;
+        let html = self.send(&format!("https://www.roblox.com{path}"), None, Some(cookie)).await?;
+        Ok(parse::server_offer(&html))
+    }
+
+    /// Buys a private server at exactly `agreed_price` Robux a month. Roblox refuses if the price has changed.
+    /// Returns the new server's id when Roblox gives it.
+    pub async fn create_private_server(&self, cookie: &str, universe_id: u64, name: &str, agreed_price: u64, idempotency_key: &str) -> Result<Option<u64>> {
+        let offer = self.server_offer(cookie, universe_id).await?;
+        if !offer.can_create {
+            return Err(AppError::Other("Roblox doesn't let this account make a private server for this game.".into()));
+        }
+        if offer.price != Some(agreed_price) {
+            return Err(AppError::Other("The price changed since you looked. Check it and confirm again.".into()));
+        }
+        let url = format!("https://games.roblox.com/v1/games/vip-servers/{universe_id}");
+        let body = serde_json::json!({ "name": name, "expectedPrice": agreed_price, "idempotencyKey": idempotency_key });
+        match self.send(&url, Some(&body), Some(cookie)).await {
+            Ok(answer) => Ok(parse::created_server_id(&answer)),
+            Err(AppError::Api(code)) if code == "HTTP 403" => {
+                Err(AppError::Other("Roblox wants a captcha for this one. Use \"Do it on Roblox\" to finish there.".into()))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Your own private servers for one game.
+    pub async fn owned_servers(&self, cookie: &str, universe_id: u64) -> Result<Vec<OwnedServer>> {
+        let url = "https://games.roblox.com/v1/private-servers/my-private-servers?privateServersTab=MyPrivateServers&itemsPerPage=100";
+        let mut servers = parse::owned_servers(&self.send(url, None, Some(cookie)).await?, universe_id)?;
+        for s in &mut servers {
+            // Best effort: a server still shows without this.
+            s.friends_allowed = self.server_friends(cookie, s.id).await.ok().flatten();
+        }
+        Ok(servers)
+    }
+
+    async fn server_friends(&self, cookie: &str, server_id: u64) -> Result<Option<bool>> {
+        let body = self.send(&format!("https://games.roblox.com/v1/vip-servers/{server_id}"), None, Some(cookie)).await?;
+        Ok(parse::friends_allowed(&body))
+    }
+
+    /// Lets your friends join one of your private servers without an invite, or stops it. Reads the server back
+    /// afterwards, so it only reports success when Roblox really changed it.
+    pub async fn set_server_friends(&self, cookie: &str, server_id: u64, allowed: bool) -> Result<()> {
+        let url = format!("https://games.roblox.com/v1/vip-servers/{server_id}/permissions");
+        self.request(true, &url, Some(&serde_json::json!({ "friendsAllowed": allowed })), Some(cookie)).await?;
+        match self.server_friends(cookie, server_id).await? {
+            Some(now) if now == allowed => Ok(()),
+            _ => Err(AppError::Other("Roblox didn't change who can join. Try it on roblox.com under Configure.".into())),
+        }
+    }
+
+    /// Turns one of your private servers on or off. Free: it doesn't touch the subscription.
+    pub async fn set_server_active(&self, cookie: &str, server_id: u64, active: bool) -> Result<()> {
+        let url = format!("https://games.roblox.com/v1/vip-servers/{server_id}");
+        self.request(true, &url, Some(&serde_json::json!({ "active": active })), Some(cookie)).await?;
+        Ok(())
+    }
+
+    /// The invite link of one of your private servers.
+    pub async fn server_invite_link(&self, cookie: &str, server_id: u64) -> Result<String> {
+        let url = format!("https://games.roblox.com/v1/vip-servers/{server_id}");
+        parse::invite_link(&self.send(&url, None, Some(cookie)).await?)
+            .ok_or_else(|| AppError::Api("Roblox didn't give an invite link for that server. Make one on roblox.com first.".into()))
+    }
+
     pub async fn private_servers(&self, cookie: &str, place_id: u64) -> Result<Vec<PrivateServer>> {
         let url = format!("https://games.roblox.com/v1/games/{place_id}/private-servers?limit=50&sortOrder=Desc");
         parse::private_servers(&self.send(&url, None, Some(cookie)).await?)
+    }
+
+    /// Description, creator, stats and a wide picture for the game page. Public, no session needed.
+    pub async fn game_details(&self, universe_id: u64) -> Result<GameDetails> {
+        let body = self.get(&format!("https://games.roblox.com/v1/games?universeIds={universe_id}"), None, LIST_TTL).await?;
+        let banner_url = format!(
+            "https://thumbnails.roblox.com/v1/games/multiget/thumbnails?universeIds={universe_id}&countPerUniverse=10&defaults=true&size=768x432&format=Png&isCircular=false"
+        );
+        // The page is still useful without its picture.
+        let banner = self.get(&banner_url, None, THUMB_TTL).await.ok();
+        let mut details = parse::game_details(&body, banner.as_deref())?;
+        details.icon_url = self.icons(&[universe_id]).await.ok().and_then(|mut i| i.remove(&universe_id));
+        Ok(details)
     }
 
     /// The game a presence points at, with its name and icon, for showing a join as a running game.

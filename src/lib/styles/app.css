@@ -57,6 +57,15 @@
   --topbar-h: 46px;
 }
 
+/* Luduvo's part of Vodka: the same glass, with a warm red accent instead of frost blue. */
+:root[data-game="luduvo"] {
+  --frost: #ffb4bc;
+  --frost-strong: #ff5a6b;
+  --frost-ink: #2e0509;
+  --frost-glow: rgba(255, 90, 107, 0.32);
+  --glow: 0 0 0 1px rgba(255, 180, 188, 0.35), 0 0 28px var(--frost-glow);
+}
+
 *,
 *::before,
 *::after {

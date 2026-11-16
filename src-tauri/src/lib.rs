@@ -1,6 +1,7 @@
 mod accounts;
 mod chat;
 mod error;
+mod luduvo;
 #[cfg(not(windows))]
 mod instances;
 #[cfg(windows)]
@@ -27,6 +28,7 @@ use tauri::{AppHandle, Manager, State};
 
 pub struct AppState {
     pub api: roblox_api::Client,
+    pub luduvo: luduvo::Client,
     pub chat: chat::Client,
     pub instances: SharedManager,
     /// The account this window is using. Kept per running Vodka, so two Vodka windows can use
@@ -466,6 +468,146 @@ async fn refresh_instance_games(app: AppHandle, state: State<'_, AppState>) -> R
 }
 
 /// Whether the active account favorited and rated a game.
+/// Opens a game's servers section on roblox.com inside Vodka, signed in, to make a private server there.
+#[tauri::command]
+async fn open_private_server_page(app: AppHandle, place_id: u64, name: String) -> Result<()> {
+    let (_, cookie) = active_cookie(&app).await?;
+    let url = tauri::Url::parse(&format!("https://www.roblox.com/games/{place_id}#!/game-instances")).map_err(|_| AppError::BlockedUrl)?;
+    let title: String = format!("Private server · {name}").chars().take(80).collect();
+    accounts::open_roblox_page(&app, &cookie, url, &title, false, None).map(|_| ())
+}
+
+#[tauri::command]
+async fn roblox_group(app: AppHandle, state: State<'_, AppState>, group_id: u64) -> Result<roblox_api::GroupInfo> {
+    match active_cookie(&app).await {
+        Ok((account, cookie)) => state.api.group(Some(&cookie), Some(account.id), group_id).await,
+        Err(AppError::NotSignedIn) => state.api.group(None, None, group_id).await,
+        Err(e) => Err(e),
+    }
+}
+
+/// Joins a group. Roblox usually asks a group join to pass its human check first, which runs inside its own web
+/// page; then Vodka lets that page do the join in a hidden, signed-in window and watches your memberships. The
+/// window only shows if Roblox wants a visible puzzle solved.
+#[tauri::command]
+async fn join_roblox_group(app: AppHandle, state: State<'_, AppState>, group_id: u64, name: String) -> Result<roblox_api::GroupInfo> {
+    let (account, cookie) = active_cookie(&app).await?;
+    match state.api.join_group(&cookie, group_id).await {
+        Ok(()) => return state.api.group(Some(&cookie), Some(account.id), group_id).await,
+        Err(AppError::Other(m)) if m == roblox_api::NEEDS_CAPTCHA => {}
+        Err(e) => {
+            eprintln!("[group] join {group_id} failed: {e}");
+            return Err(e);
+        }
+    }
+    let url = tauri::Url::parse(&format!("https://www.roblox.com/communities/{group_id}")).map_err(|_| AppError::BlockedUrl)?;
+    let title: String = format!("Join {name}").chars().take(80).collect();
+    let window = accounts::open_roblox_page(&app, &cookie, url, &title, true, Some(accounts::JOIN_GROUP_SCRIPT))?;
+    let started = std::time::Instant::now();
+    let mut shown = false;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        // Closed by the person: stop waiting.
+        if app.get_webview_window(accounts::ROBLOX_PAGE_WINDOW).is_none() {
+            break;
+        }
+        state.api.clear_cache();
+        if let Ok(info) = state.api.group(Some(&cookie), Some(account.id), group_id).await
+            && info.my_role.is_some()
+        {
+            let _ = window.close();
+            return Ok(info);
+        }
+        // Still not in after a while: Roblox wants a puzzle solved (or the group approves members). Show the page.
+        if !shown && started.elapsed() > std::time::Duration::from_secs(12) {
+            let _ = window.show();
+            let _ = window.set_focus();
+            shown = true;
+        }
+        if started.elapsed() > std::time::Duration::from_secs(180) {
+            let _ = window.close();
+            break;
+        }
+    }
+    state.api.group(Some(&cookie), Some(account.id), group_id).await
+}
+
+/// Opens the group's page on roblox.com inside Vodka, signed in, to finish a join that needs a captcha.
+#[tauri::command]
+async fn open_group_page(app: AppHandle, group_id: u64, name: String) -> Result<()> {
+    let (_, cookie) = active_cookie(&app).await?;
+    let url = tauri::Url::parse(&format!("https://www.roblox.com/communities/{group_id}")).map_err(|_| AppError::BlockedUrl)?;
+    let title: String = format!("Join {name}").chars().take(80).collect();
+    accounts::open_roblox_page(&app, &cookie, url, &title, false, None).map(|_| ())
+}
+
+#[tauri::command]
+async fn private_server_offer(app: AppHandle, state: State<'_, AppState>, universe_id: u64) -> Result<roblox_api::ServerOffer> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.server_offer(&cookie, universe_id).await
+}
+
+/// Buys a private server. `agreed_price` is the monthly price the person confirmed in Vodka's dialog.
+#[tauri::command]
+async fn create_private_server(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    universe_id: u64,
+    name: String,
+    agreed_price: u64,
+    friends_allowed: bool,
+) -> Result<Option<String>> {
+    let name: String = name.trim().chars().take(50).collect();
+    if name.is_empty() {
+        return Err(AppError::Other("Give the server a name first.".into()));
+    }
+    let (_, cookie) = active_cookie(&app).await?;
+    let created = match state.api.create_private_server(&cookie, universe_id, &name, agreed_price, &purchase_key()?).await {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("[private-server] create for universe {universe_id} at {agreed_price} Robux failed: {e}");
+            return Err(e);
+        }
+    };
+    state.api.clear_cache();
+    // The server exists either way; a failed friends setting is reported back as a note, not as a failure.
+    let note = match (friends_allowed, created) {
+        (false, _) => None,
+        (true, Some(id)) => state.api.set_server_friends(&cookie, id, true).await.err().map(|e| e.to_string()),
+        (true, None) => Some("Roblox didn't say which server it made, so friends can't join yet. Turn it on under \"Yours\".".into()),
+    };
+    Ok(note)
+}
+
+#[tauri::command]
+async fn owned_servers(app: AppHandle, state: State<'_, AppState>, universe_id: u64) -> Result<Vec<roblox_api::OwnedServer>> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.owned_servers(&cookie, universe_id).await
+}
+
+#[tauri::command]
+async fn set_server_active(app: AppHandle, state: State<'_, AppState>, server_id: u64, active: bool) -> Result<()> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.set_server_active(&cookie, server_id, active).await
+}
+
+#[tauri::command]
+async fn set_server_friends(app: AppHandle, state: State<'_, AppState>, server_id: u64, allowed: bool) -> Result<()> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.set_server_friends(&cookie, server_id, allowed).await
+}
+
+#[tauri::command]
+async fn server_invite_link(app: AppHandle, state: State<'_, AppState>, server_id: u64) -> Result<String> {
+    let (_, cookie) = active_cookie(&app).await?;
+    state.api.server_invite_link(&cookie, server_id).await
+}
+
+#[tauri::command]
+async fn game_details(state: State<'_, AppState>, universe_id: u64) -> Result<roblox_api::GameDetails> {
+    state.api.game_details(universe_id).await
+}
+
 #[tauri::command]
 async fn game_standing(app: AppHandle, state: State<'_, AppState>, universe_id: u64) -> Result<GameStanding> {
     state.api.game_standing(&active_cookie(&app).await?.1, universe_id).await
@@ -888,11 +1030,214 @@ fn set_flags(app: AppHandle, flags: Flags) -> Result<Settings> {
     })
 }
 
+// ---------------------------------------------------------------------------------------------
+// Luduvo
+
+#[tauri::command]
+async fn luduvo_status() -> Result<luduvo::Status> {
+    blocking(|| Ok(luduvo::detect())).await
+}
+
+/// The signed-in Luduvo account, or `None` when nobody is signed in or the session ran out.
+#[tauri::command]
+async fn luduvo_account(state: State<'_, AppState>) -> Result<Option<luduvo::User>> {
+    if !state.luduvo.has_session().await? {
+        return Ok(None);
+    }
+    match state.luduvo.me().await {
+        Ok(user) => Ok(Some(user)),
+        Err(e) if e.to_string().contains("expired") || e.to_string().contains("not signed in") => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+#[tauri::command]
+async fn luduvo_sign_in(state: State<'_, AppState>) -> Result<luduvo::User> {
+    state.luduvo.sign_in().await
+}
+
+#[tauri::command]
+fn luduvo_cancel_sign_in(state: State<'_, AppState>) {
+    state.luduvo.cancel_sign_in();
+}
+
+#[tauri::command]
+async fn luduvo_sign_out(state: State<'_, AppState>) -> Result<()> {
+    state.luduvo.sign_out().await
+}
+
+#[tauri::command]
+async fn luduvo_discover(state: State<'_, AppState>) -> Result<Vec<luduvo::Shelf>> {
+    state.luduvo.discover().await
+}
+
+#[tauri::command]
+async fn luduvo_search(state: State<'_, AppState>, query: String) -> Result<Vec<luduvo::Place>> {
+    state.luduvo.search(&query).await
+}
+
+#[tauri::command]
+async fn luduvo_recent(state: State<'_, AppState>) -> Result<Vec<luduvo::Place>> {
+    state.luduvo.recently_played().await
+}
+
+/// Hands the launcher a join link and watches the game until it closes.
+fn run_luduvo(app: &AppHandle, state: &AppState, link: &str, place_id: u64, title: String) -> Result<luduvo::Running> {
+    use tauri::Emitter;
+    let mut child = luduvo::spawn(Some(link))?;
+    let pid = child.id().unwrap_or_default();
+    let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default();
+    let running = luduvo::Running { place_id, title, pid, started_at };
+    *state.luduvo.running.lock().unwrap() = Some(running.clone());
+    let _ = app.emit("luduvo://changed", ());
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = child.wait().await;
+        let state = handle.state::<AppState>();
+        {
+            let mut slot = state.luduvo.running.lock().unwrap();
+            if slot.as_ref().is_some_and(|r| r.pid == pid) {
+                *slot = None;
+            }
+        }
+        let _ = handle.emit("luduvo://changed", ());
+    });
+    Ok(running)
+}
+
+fn luduvo_ready(state: &AppState) -> Result<()> {
+    if luduvo::launcher().is_none() {
+        return Err(AppError::Other("Luduvo isn't installed. Install it with the command on the Luduvo page.".into()));
+    }
+    let busy = state.luduvo.running.lock().unwrap().clone();
+    match busy {
+        Some(r) => Err(AppError::Other(format!("You're already playing {}. Close it first, then press Play.", r.title))),
+        None => Ok(()),
+    }
+}
+
+/// Joins a Luduvo game: asks Luduvo for a seat, then starts it.
+#[tauri::command]
+async fn luduvo_play(app: AppHandle, state: State<'_, AppState>, place_id: u64, title: String) -> Result<luduvo::Running> {
+    luduvo_ready(&state)?;
+    let link = state.luduvo.join(place_id).await?;
+    run_luduvo(&app, &state, &link, place_id, title)
+}
+
+/// Joins the server a friend is in.
+#[tauri::command]
+async fn luduvo_join_friend(app: AppHandle, state: State<'_, AppState>, user_id: u64, place_id: Option<u64>, title: String) -> Result<luduvo::Running> {
+    luduvo_ready(&state)?;
+    let link = state.luduvo.join_friend(user_id).await?;
+    run_luduvo(&app, &state, &link, place_id.unwrap_or_default(), title)
+}
+
+#[tauri::command]
+async fn luduvo_details(state: State<'_, AppState>, place_id: u64) -> Result<luduvo::PlaceDetails> {
+    state.luduvo.details(place_id).await
+}
+
+#[tauri::command]
+async fn luduvo_rating(state: State<'_, AppState>, place_id: u64) -> Result<luduvo::Rating> {
+    state.luduvo.rating(place_id).await
+}
+
+#[tauri::command]
+async fn luduvo_rate(state: State<'_, AppState>, place_id: u64, value: i64) -> Result<luduvo::Rating> {
+    state.luduvo.rate(place_id, value).await
+}
+
+/// Opens a roblox.com or luduvo.com page in the person's browser (a group page, say).
+#[tauri::command]
+fn open_external(url: String) -> Result<()> {
+    let parsed = reqwest::Url::parse(&url).map_err(|_| AppError::BlockedUrl)?;
+    let host = parsed.host_str().unwrap_or_default();
+    let allowed = parsed.scheme() == "https"
+        && parsed.port().is_none()
+        && parsed.username().is_empty()
+        && (host == "www.roblox.com" || host == "roblox.com" || host == "luduvo.com");
+    if !allowed {
+        return Err(AppError::BlockedUrl);
+    }
+    luduvo::open_browser(parsed.as_str())
+}
+
+/// Joins a private server from its code.
+#[tauri::command]
+async fn luduvo_play_private(app: AppHandle, state: State<'_, AppState>, code: String, place_id: u64, title: String) -> Result<luduvo::Running> {
+    luduvo_ready(&state)?;
+    let link = state.luduvo.join_private(&code).await?;
+    run_luduvo(&app, &state, &link, place_id, title)
+}
+
+#[tauri::command]
+async fn luduvo_join_group(state: State<'_, AppState>, group_id: u64) -> Result<()> {
+    state.luduvo.join_group(group_id).await
+}
+
+#[tauri::command]
+async fn luduvo_servers(state: State<'_, AppState>, place_id: u64) -> Result<Vec<luduvo::Server>> {
+    state.luduvo.servers(place_id).await
+}
+
+/// Joins one particular server of a game.
+#[tauri::command]
+async fn luduvo_play_server(app: AppHandle, state: State<'_, AppState>, server_id: String, place_id: u64, title: String) -> Result<luduvo::Running> {
+    luduvo_ready(&state)?;
+    let link = state.luduvo.join_server(&server_id).await?;
+    run_luduvo(&app, &state, &link, place_id, title)
+}
+
+#[tauri::command]
+async fn luduvo_friends(state: State<'_, AppState>) -> Result<Vec<luduvo::Friend>> {
+    state.luduvo.friends().await
+}
+
+#[tauri::command]
+async fn luduvo_friend_requests(state: State<'_, AppState>) -> Result<Vec<luduvo::Friend>> {
+    state.luduvo.friend_requests().await
+}
+
+#[tauri::command]
+async fn luduvo_answer_request(state: State<'_, AppState>, user_id: u64, accept: bool) -> Result<()> {
+    state.luduvo.answer_request(user_id, accept).await
+}
+
+#[tauri::command]
+async fn luduvo_balance(state: State<'_, AppState>) -> Result<Option<i64>> {
+    state.luduvo.balance().await
+}
+
+#[tauri::command]
+async fn luduvo_claim_daily(state: State<'_, AppState>) -> Result<serde_json::Value> {
+    state.luduvo.claim_daily().await
+}
+
+#[tauri::command]
+fn luduvo_running(state: State<'_, AppState>) -> Option<luduvo::Running> {
+    state.luduvo.running.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn luduvo_stop(state: State<'_, AppState>) -> Result<()> {
+    let running = state.luduvo.running.lock().unwrap().clone();
+    match running {
+        Some(r) => luduvo::stop(r.pid),
+        None => Ok(()),
+    }
+}
+
+#[tauri::command]
+async fn luduvo_open_studio() -> Result<()> {
+    luduvo::open_studio()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             api: roblox_api::Client::new(),
+            luduvo: luduvo::Client::new(),
             chat: chat::Client::new(),
             instances: SharedManager::default(),
             active: std::sync::Mutex::new(None),
@@ -918,6 +1263,17 @@ pub fn run() {
             regroup,
             list_instances,
             refresh_instance_games,
+            game_details,
+            owned_servers,
+            private_server_offer,
+            roblox_group,
+            join_roblox_group,
+            open_group_page,
+            create_private_server,
+            open_private_server_page,
+            set_server_active,
+            server_invite_link,
+            set_server_friends,
             game_standing,
             set_favorite,
             set_vote,
@@ -952,7 +1308,33 @@ pub fn run() {
             chat_invite,
             party,
             chat_sign_out,
-            chat_delete_account
+            chat_delete_account,
+            luduvo_status,
+            luduvo_account,
+            luduvo_sign_in,
+            luduvo_cancel_sign_in,
+            luduvo_sign_out,
+            luduvo_discover,
+            luduvo_search,
+            luduvo_recent,
+            luduvo_play,
+            luduvo_running,
+            luduvo_join_friend,
+            luduvo_details,
+            luduvo_rating,
+            luduvo_rate,
+            luduvo_servers,
+            luduvo_join_group,
+            luduvo_play_private,
+            open_external,
+            luduvo_play_server,
+            luduvo_friends,
+            luduvo_friend_requests,
+            luduvo_answer_request,
+            luduvo_balance,
+            luduvo_claim_daily,
+            luduvo_stop,
+            luduvo_open_studio
         ])
         .run(tauri::generate_context!())
         .expect("error while running Vodka Launcher");

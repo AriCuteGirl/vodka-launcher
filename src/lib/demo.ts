@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import { NO_OPTIONS, type Account, type AppError, type ChatContact, type ChatMessage, type GameStanding, type Item, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, type LuduvoFriend, type LuduvoPlace, type LuduvoRunning, type LuduvoUser, type Account, type AppError, type ChatContact, type ChatMessage, type GameStanding, type Item, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -15,6 +15,19 @@ export const DEMO_GAMES: Game[] = [
   { universeId: 7018190066, placeId: 116495829188952, name: "Dead Rails", playing: 18859, iconUrl: null },
 ];
 
+const LUDUVO_THUMB = "https://assets.luduvo.com/place-thumbnails/";
+const luduvoPlace = (id: number, title: string, creator: string, playing: number, maxPlayers: number, visits: number, icon: string | null): LuduvoPlace => ({
+  id, title, creator, description: "", iconUrl: icon ? LUDUVO_THUMB + icon : null, bannerUrl: null, playing, maxPlayers, visits, likes: Math.round(visits / 30), dislikes: 0, playtime: visits * 9,
+});
+export const DEMO_LUDUVO: LuduvoPlace[] = [
+  luduvoPlace(30, "snow battle", "SAD", 0, 20, 188, "589410eb-4799-44e4-a10f-f429e5fff173.png"),
+  luduvoPlace(2811, "11/14/26", "Jashluk", 0, 50, 94, "ff9c1dc8-b962-4eb8-a069-d3fcdd4ffd5a.png"),
+  luduvoPlace(2869, "BoomBox!", "3xs", 6, 24, 43, "c98361ef-4dbe-4530-a30c-b3fc699fb8e8.png"),
+  luduvoPlace(1988, "Murder Mayhem", "foren", 4, 12, 1320, null),
+  luduvoPlace(412, "Obby Tower", "brickwise", 2, 30, 870, null),
+  luduvoPlace(77, "Hangout Café", "mellow", 1, 40, 2210, null),
+];
+
 const ERRORS: Record<string, AppError> = {
   ratelimited: { kind: "rate_limited", message: "Roblox is limiting requests right now. Give it a minute and retry." },
   offline: { kind: "offline", message: "Can't reach Roblox. Check your internet connection." },
@@ -23,6 +36,18 @@ const ERRORS: Record<string, AppError> = {
 };
 
 const scenario = () => new URLSearchParams(location.search).get("demo") ?? "default";
+let luduvoRunning: LuduvoRunning | null = null;
+const luduvoFriend = (id: number, displayName: string, state: string, placeTitle: string | null = null): LuduvoFriend => ({
+  id, name: displayName.toLowerCase(), displayName, avatarUrl: null, state, placeId: placeTitle ? 2869 : null, placeTitle, joinable: state === "in_game",
+});
+let luduvoFriends: LuduvoFriend[] = [luduvoFriend(3, "Nikhil", "in_game", "Stamper Build"), luduvoFriend(4, "poptart", "online"), luduvoFriend(5, "alt9999990929", "offline")];
+let luduvoRequests: LuduvoFriend[] = [luduvoFriend(6, "snowmelt", "offline")];
+let luduvoCoins = 40;
+let demoGroup = { id: 4372130, name: "Gamer Robot Inc", members: 19707257, verified: true, publicEntry: true, myRole: null as string | null };
+let demoVipServers = [{ id: 77, name: "Farm room", active: true, expires: "2026-12-14T00:00:00Z", willRenew: true, price: 100, friendsAllowed: false }];
+let luduvoVote = { likes: 4, dislikes: 0, vote: 0 };
+let luduvoClaimed = false;
+let luduvoUser: LuduvoUser | null = scenario() === "signedout" ? null : { id: 9001, name: "puppygirl", displayName: "Puppy Girl", balance: 40 };
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const signedOut = ["onboarding", "signedout"].includes(scenario());
 
@@ -490,6 +515,162 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       }, 500);
       return null;
     }
+    case "luduvo_status":
+      await wait(120);
+      return { installed: s !== "noluduvo", version: "54", supported: true, installCommand: "curl -fsSL https://assets.luduvo.com/install.sh | sh" };
+    case "luduvo_account":
+      await wait(150);
+      return luduvoUser;
+    case "luduvo_sign_in":
+      await wait(1500);
+      luduvoUser = { id: 9001, name: "puppygirl", displayName: "Puppy Girl", balance: 40 };
+      return luduvoUser;
+    case "luduvo_cancel_sign_in":
+      return null;
+    case "luduvo_sign_out":
+      luduvoUser = null;
+      return null;
+    case "luduvo_discover":
+      await wait(400);
+      if (s in ERRORS) throw ERRORS[s];
+      return [
+        { id: "recommended", title: "Recommended For You", subtitle: "Curated for your play style", places: DEMO_LUDUVO.slice(0, 5) },
+        { id: "active", title: "Most Active", subtitle: "Where everyone is right now", places: [...DEMO_LUDUVO].sort((a, b) => b.playing - a.playing) },
+      ];
+    case "luduvo_search": {
+      await wait(300);
+      const q = String(args.query ?? "").toLowerCase();
+      return DEMO_LUDUVO.filter((p) => p.title.toLowerCase().includes(q));
+    }
+    case "luduvo_recent":
+      await wait(250);
+      return DEMO_LUDUVO.slice(2, 5);
+    case "luduvo_play": {
+      await wait(700);
+      const place = DEMO_LUDUVO.find((p) => p.id === args.placeId);
+      luduvoRunning = { placeId: args.placeId as number, title: place?.title ?? "Game", pid: 4242, startedAt: Math.floor(Date.now() / 1000) };
+      return luduvoRunning;
+    }
+    case "open_private_server_page":
+      return null;
+    case "roblox_group":
+      await wait(200);
+      return demoGroup;
+    case "join_roblox_group":
+      await wait(500);
+      demoGroup = { ...demoGroup, myRole: "Member" };
+      return demoGroup;
+    case "open_group_page":
+      return null;
+    case "private_server_offer":
+      await wait(300);
+      return { canCreate: true, price: 39 };
+    case "create_private_server":
+      await wait(600);
+      demoVipServers = [...demoVipServers, { id: 90 + demoVipServers.length, name: String(args.name), active: true, expires: "2026-12-16T00:00:00Z", willRenew: true, price: Number(args.agreedPrice), friendsAllowed: Boolean(args.friendsAllowed) }];
+      return null;
+    case "set_server_friends":
+      await wait(300);
+      demoVipServers = demoVipServers.map((o) => (o.id === args.serverId ? { ...o, friendsAllowed: Boolean(args.allowed) } : o));
+      return null;
+    case "owned_servers":
+      await wait(250);
+      return demoVipServers;
+    case "set_server_active":
+      demoVipServers = demoVipServers.map((o) => (o.id === args.serverId ? { ...o, active: Boolean(args.active) } : o));
+      return null;
+    case "server_invite_link":
+      return "https://www.roblox.com/share?code=demo1234&type=Server";
+    case "game_details": {
+      await wait(250);
+      const g = DEMO_GAMES.find((x) => x.universeId === args.universeId);
+      return {
+        universeId: args.universeId,
+        name: g?.name ?? "Demo game",
+        rootPlaceId: g?.placeId ?? 1,
+        creatorId: 4372130,
+        creatorType: "Group",
+        iconUrl: g?.iconUrl ?? null,
+        gallery: [],
+        description: `Welcome to ${g?.name ?? "this game"}! Team up with friends, unlock new gear every week and climb the leaderboards.\n\nUpdate log:\n- New map\n- Bug fixes and better performance\n- Halloween event until November 20`,
+        creator: "Demo Studios",
+        creatorVerified: true,
+        playing: g?.playing ?? 1200,
+        visits: 1_234_567_890,
+        favorites: 4_200_000,
+        maxPlayers: 16,
+        genre: "Adventure",
+        updated: "2026-11-14T18:22:45Z",
+        bannerUrl: null,
+      };
+    }
+    case "luduvo_details": {
+      await wait(250);
+      const place = DEMO_LUDUVO.find((p) => p.id === args.placeId) ?? DEMO_LUDUVO[0];
+      return { place: { ...place, description: "its winter time!!! go battle it out and show who's the best out in snow field!\n\nupdate 1.1\n- spawn protection." }, createdAt: 1782496622, updatedAt: 1794441417, ageRating: "all_ages", contentWarnings: ["online interactions"], groupId: 9, groupName: "Snow Builders" };
+    }
+    case "luduvo_rating":
+      return luduvoVote;
+    case "luduvo_rate": {
+      const v = Number(args.value);
+      const was = luduvoVote.vote;
+      luduvoVote = {
+        likes: luduvoVote.likes + (v === 1 ? 1 : 0) - (was === 1 ? 1 : 0),
+        dislikes: luduvoVote.dislikes + (v === -1 ? 1 : 0) - (was === -1 ? 1 : 0),
+        vote: v,
+      };
+      return luduvoVote;
+    }
+    case "luduvo_play_private":
+      await wait(600);
+      if (String(args.code).trim().length < 4) throw { kind: "other", message: "That doesn't look like a Luduvo private server code." };
+      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4245, startedAt: Math.floor(Date.now() / 1000) };
+      return luduvoRunning;
+    case "luduvo_join_group":
+      await wait(300);
+      return null;
+    case "open_external":
+      return null;
+    case "luduvo_servers":
+      await wait(300);
+      return [
+        { id: "8513af4f-3721-43ed-97ff-2479392b7f5c", playing: 2, maxPlayers: 16, players: [{ id: 1, name: "EyeLashGaming", avatarUrl: null }, { id: 2, name: "advertiser", avatarUrl: null }] },
+        { id: "1d0c55aa-0000-4c2e-9f00-2479392b7f5d", playing: 9, maxPlayers: 16, players: Array.from({ length: 9 }, (_, i) => ({ id: 10 + i, name: `player${i}`, avatarUrl: null })) },
+      ];
+    case "luduvo_play_server":
+      await wait(700);
+      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4244, startedAt: Math.floor(Date.now() / 1000) };
+      return luduvoRunning;
+    case "luduvo_friends":
+      await wait(300);
+      return luduvoFriends;
+    case "luduvo_friend_requests":
+      return luduvoRequests;
+    case "luduvo_answer_request": {
+      const who = luduvoRequests.find((r) => r.id === args.userId);
+      luduvoRequests = luduvoRequests.filter((r) => r.id !== args.userId);
+      if (who && args.accept) luduvoFriends = [...luduvoFriends, who];
+      return null;
+    }
+    case "luduvo_join_friend":
+      await wait(700);
+      luduvoRunning = { placeId: (args.placeId as number) ?? 0, title: String(args.title), pid: 4243, startedAt: Math.floor(Date.now() / 1000) };
+      return luduvoRunning;
+    case "luduvo_balance":
+      return luduvoCoins;
+    case "luduvo_claim_daily":
+      await wait(400);
+      if (luduvoClaimed) throw { kind: "other", message: "Luduvo: You already claimed today's reward." };
+      luduvoClaimed = true;
+      luduvoCoins += 10;
+      return { amount: 10, balance: luduvoCoins };
+    case "luduvo_running":
+      return luduvoRunning;
+    case "luduvo_stop":
+      luduvoRunning = null;
+      return null;
+    case "luduvo_open_studio":
+      return null;
   }
   throw { kind: "other", message: `Unknown command ${cmd}` };
 }
