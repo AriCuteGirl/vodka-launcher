@@ -4,6 +4,7 @@
   import Logo from "$lib/components/Logo.svelte";
   import TweaksEditor from "$lib/components/TweaksEditor.svelte";
   import { app, askMultiInstance, onWindows, removeAccount, setFlags, signIn } from "$lib/state.svelte";
+  import { alerts, savePrefs } from "$lib/alerts.svelte";
   import { version } from "../../../package.json";
 </script>
 
@@ -28,6 +29,18 @@
         <Button variant="primary" busy={app.signingIn} onclick={signIn}>Sign in with Roblox</Button>
       </div>
     {/if}
+  </section>
+
+  <section class="glass">
+    <h2>Notifications</h2>
+    <label class="row toggle">
+      <input type="checkbox" bind:checked={alerts.prefs.online} onchange={savePrefs} />
+      <span class="grow"><b>When a friend comes online</b><span class="faint">A small pop-up at the top right, for Roblox and Luduvo friends.</span></span>
+    </label>
+    <label class="row toggle">
+      <input type="checkbox" bind:checked={alerts.prefs.playing} onchange={savePrefs} />
+      <span class="grow"><b>When a friend starts a game</b><span class="faint">With a Join button when their server can be joined.</span></span>
+    </label>
   </section>
 
   <section class="glass">
@@ -127,6 +140,17 @@
     display: flex;
     align-items: center;
     gap: var(--s-4);
+  }
+  .toggle {
+    cursor: pointer;
+  }
+  .toggle input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--frost-strong);
+  }
+  .toggle .grow {
+    display: grid;
   }
   .grow {
     flex: 1;

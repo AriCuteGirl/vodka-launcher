@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Friend pop-ups: when a Roblox or Luduvo friend comes online or starts a game, a small card at the top right says so, with Join and Profile. Both kinds can be turned off in Settings → Notifications.
 - Luduvo: while Luduvo updates itself or downloads game content before a game, the banner shows what it's doing with a progress bar instead of nothing.
 - Roblox profiles: click a friend (or Your profile in the account menu) to see their status with Join, friends, followers, about, their friends, games they made, favorites and groups.
 - Luduvo: Marketplace (search, categories, sort, like, favorite, buy after confirming the C$ price), a Friends page (add by username, requests, join, remove), an Avatar page (what you wear, your items, outfits) and profiles.

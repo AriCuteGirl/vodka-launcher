@@ -1,6 +1,7 @@
 <script lang="ts">
   import "$lib/styles/app.css";
   import Button from "$lib/components/Button.svelte";
+  import FriendAlerts from "$lib/components/FriendAlerts.svelte";
   import GameRail from "$lib/components/GameRail.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import LaunchDialog from "$lib/components/LaunchDialog.svelte";
@@ -137,6 +138,7 @@
 {#if app.launchDialog}<LaunchDialog />{/if}
 
 <Toasts />
+<FriendAlerts />
 
 <style>
   .splash {

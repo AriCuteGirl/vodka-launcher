@@ -1,5 +1,6 @@
 // Luduvo's part of Vodka: its own account, game lists and Play, separate from Roblox's state.
 import { api } from "./api";
+import { noteFriends } from "./alerts.svelte";
 import { toast } from "./state.svelte";
 import { toAppError, type Loadable, type LuduvoFriend, type LuduvoPlace, type LuduvoRunning, type LuduvoShelf, type LuduvoStatus, type LuduvoUser } from "./types";
 
@@ -43,6 +44,21 @@ export async function loadSocial() {
   try {
     const friends = await api.luduvoFriends();
     luduvo.friends = { status: "ready", data: friends };
+    if (luduvo.user) {
+      noteFriends(
+        "luduvo",
+        luduvo.user.id,
+        friends.map((f) => ({
+          id: f.id,
+          name: f.displayName,
+          avatarUrl: f.avatarUrl,
+          activity: f.state === "in_game" ? "playing" : f.state === "online" ? "online" : "offline",
+          game: f.state === "in_game" ? f.placeTitle : null,
+          join: f.state === "in_game" && f.joinable ? () => void joinLuduvoFriend(f) : null,
+          profile: `/luduvo/users/${f.id}`,
+        })),
+      );
+    }
   } catch (e) {
     // Keep showing the last list if a refresh fails.
     if (luduvo.friends.status !== "ready") luduvo.friends = { status: "error", error: toAppError(e) };
