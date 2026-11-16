@@ -370,6 +370,11 @@ export interface LuduvoRunning {
   pid: number;
   /** Unix seconds. */
   startedAt: number;
+  /** checking, updating, content (downloading game content), starting, or playing. */
+  stage: string;
+  /** Content downloaded so far out of total, while stage is "content". */
+  done: number | null;
+  total: number | null;
 }
 
 export interface LuduvoFriend {

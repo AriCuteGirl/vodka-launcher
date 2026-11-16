@@ -239,6 +239,15 @@ export async function playLuduvoPrivate(place: LuduvoPlace, code: string): Promi
   }
 }
 
+/** What a starting Luduvo game is doing, in words; null once it's running. */
+export function startingText(r: LuduvoRunning | null): string | null {
+  if (!r || r.stage === "playing") return null;
+  if (r.stage === "updating") return "Updating Luduvo…";
+  if (r.stage === "content") return r.done != null && r.total ? `Downloading game content · ${r.done} of ${r.total}` : "Downloading game content…";
+  if (r.stage === "starting") return "Starting the game…";
+  return "Checking for updates…";
+}
+
 export async function stopLuduvo() {
   try {
     await api.luduvoStop();

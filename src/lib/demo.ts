@@ -563,7 +563,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_play": {
       await wait(700);
       const place = DEMO_LUDUVO.find((p) => p.id === args.placeId);
-      luduvoRunning = { placeId: args.placeId as number, title: place?.title ?? "Game", pid: 4242, startedAt: Math.floor(Date.now() / 1000) };
+      luduvoRunning = { placeId: args.placeId as number, title: place?.title ?? "Game", pid: 4242, startedAt: Math.floor(Date.now() / 1000), stage: "content", done: 850, total: 1922 };
       return luduvoRunning;
     }
     case "open_private_server_page":
@@ -665,7 +665,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_play_private":
       await wait(600);
       if (String(args.code).trim().length < 4) throw { kind: "other", message: "That doesn't look like a Luduvo private server code." };
-      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4245, startedAt: Math.floor(Date.now() / 1000) };
+      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4245, startedAt: Math.floor(Date.now() / 1000), stage: "playing", done: null, total: null };
       return luduvoRunning;
     case "luduvo_join_group":
       await wait(300);
@@ -680,7 +680,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       ];
     case "luduvo_play_server":
       await wait(700);
-      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4244, startedAt: Math.floor(Date.now() / 1000) };
+      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4244, startedAt: Math.floor(Date.now() / 1000), stage: "playing", done: null, total: null };
       return luduvoRunning;
     case "luduvo_store_categories":
       return [
@@ -769,7 +769,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     }
     case "luduvo_join_friend":
       await wait(700);
-      luduvoRunning = { placeId: (args.placeId as number) ?? 0, title: String(args.title), pid: 4243, startedAt: Math.floor(Date.now() / 1000) };
+      luduvoRunning = { placeId: (args.placeId as number) ?? 0, title: String(args.title), pid: 4243, startedAt: Math.floor(Date.now() / 1000), stage: "playing", done: null, total: null };
       return luduvoRunning;
     case "luduvo_balance":
       return luduvoCoins;

@@ -84,6 +84,22 @@ pub struct Running {
     pub pid: u32,
     /// Unix seconds.
     pub started_at: u64,
+    /// `checking`, `updating`, `content` (downloading game content), `starting` or `playing`.
+    pub stage: String,
+    /// Content downloaded so far, out of `total`, while `stage` is `content`.
+    pub done: Option<u64>,
+    pub total: Option<u64>,
+}
+
+/// Whether the launcher Vodka started has turned into the game itself (it replaces itself with `LuduvoGame`).
+pub fn is_game_process(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.trim() == "LuduvoGame")
+}
+
+/// What Luduvo's launcher log says about a start that began at `since_ms` (Unix milliseconds).
+pub fn launch_step(since_ms: u64) -> Option<parse::LaunchStep> {
+    let log = std::fs::read_to_string(install_dir()?.join("launcher.log")).ok()?;
+    parse::launch_step(&log, since_ms)
 }
 
 /// Starts the launcher with `arg` (a join link) or, with `None`, opens Luduvo Studio.

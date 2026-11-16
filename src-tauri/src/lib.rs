@@ -1127,7 +1127,7 @@ fn run_luduvo(app: &AppHandle, state: &AppState, link: &str, place_id: u64, titl
     let mut child = luduvo::spawn(Some(link))?;
     let pid = child.id().unwrap_or_default();
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default();
-    let running = luduvo::Running { place_id, title, pid, started_at };
+    let running = luduvo::Running { place_id, title, pid, started_at, stage: "checking".into(), done: None, total: None };
     *state.luduvo.running.lock().unwrap() = Some(running.clone());
     let _ = app.emit("luduvo://changed", ());
     let handle = app.clone();
@@ -1142,7 +1142,48 @@ fn run_luduvo(app: &AppHandle, state: &AppState, link: &str, place_id: u64, titl
         }
         let _ = handle.emit("luduvo://changed", ());
     });
+    watch_luduvo_start(app.clone(), pid, started_at);
     Ok(running)
+}
+
+/// Follows a starting Luduvo game from its launcher log (updating, downloading content) until the launcher turns
+/// into the game, so the UI can show progress instead of nothing.
+fn watch_luduvo_start(app: AppHandle, pid: u32, started_at: u64) {
+    use tauri::Emitter;
+    tauri::async_runtime::spawn(async move {
+        let since_ms = started_at.saturating_mul(1000);
+        for _ in 0..(20 * 60) {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let playing = luduvo::is_game_process(pid);
+            let step = if playing { None } else { luduvo::launch_step(since_ms) };
+            let (stage, done, total) = match (playing, step) {
+                (true, _) => ("playing".to_owned(), None, None),
+                (false, Some(s)) => (s.stage.to_owned(), s.done, s.total),
+                (false, None) => continue,
+            };
+            let state = app.state::<AppState>();
+            let changed = {
+                let mut slot = state.luduvo.running.lock().unwrap();
+                match slot.as_mut() {
+                    Some(r) if r.pid == pid => {
+                        let changed = r.stage != stage || r.done != done || r.total != total;
+                        r.stage = stage.clone();
+                        r.done = done;
+                        r.total = total;
+                        changed
+                    }
+                    // The game ended or another one started.
+                    _ => return,
+                }
+            };
+            if changed {
+                let _ = app.emit("luduvo://changed", ());
+            }
+            if stage == "playing" {
+                return;
+            }
+        }
+    });
 }
 
 fn luduvo_ready(state: &AppState) -> Result<()> {

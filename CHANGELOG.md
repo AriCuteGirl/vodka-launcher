@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Luduvo: while Luduvo updates itself or downloads game content before a game, the banner shows what it's doing with a progress bar instead of nothing.
 - Roblox profiles: click a friend (or Your profile in the account menu) to see their status with Join, friends, followers, about, their friends, games they made, favorites and groups.
 - Luduvo: Marketplace (search, categories, sort, like, favorite, buy after confirming the C$ price), a Friends page (add by username, requests, join, remove), an Avatar page (what you wear, your items, outfits) and profiles.
 - Luduvo friends in a game get a Join button.

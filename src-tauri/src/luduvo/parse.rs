@@ -472,6 +472,69 @@ pub fn groups(v: &Value) -> Vec<Group> {
         .unwrap_or_default()
 }
 
+/// Where a starting game is, read from Luduvo's launcher log.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchStep {
+    /// `checking`, `updating`, `content`, `starting`.
+    pub stage: &'static str,
+    pub done: Option<u64>,
+    pub total: Option<u64>,
+}
+
+/// `2026-11-16T13:47:55.861Z` as Unix milliseconds.
+fn log_time_ms(stamp: &str) -> Option<u64> {
+    let b = stamp.as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[10] != b'T' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| stamp.get(r)?.parse::<i64>().ok();
+    let (y, m, d) = (n(0..4)?, n(5..7)?, n(8..10)?);
+    let (h, mi, sec) = (n(11..13)?, n(14..16)?, n(17..19)?);
+    let ms = if b.get(19) == Some(&b'.') { n(20..23).unwrap_or(0) } else { 0 };
+    // Days from 1970-01-01 to y-m-d (proleptic Gregorian).
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(((days * 24 + h) * 60 + mi) * 60_000 + sec * 1000 + ms).ok()
+}
+
+/// The latest step in Luduvo's launcher log written at or after `since_ms` (Unix milliseconds); `None` before it
+/// wrote anything for this start.
+pub fn launch_step(log: &str, since_ms: u64) -> Option<LaunchStep> {
+    let mut step = None;
+    for line in log.lines() {
+        let Some(when) = line.split_whitespace().next().and_then(log_time_ms) else { continue };
+        // A little slack for the two clocks.
+        if when + 2000 < since_ms {
+            continue;
+        }
+        let text = line.split_once(" | ").map(|(_, t)| t).unwrap_or(line);
+        let next = if text.starts_with("update available") || text.starts_with("downloading") {
+            Some(LaunchStep { stage: "updating", done: None, total: None })
+        } else if text.starts_with("update applied") || text.contains("up to date") || text.contains("update applied") {
+            Some(LaunchStep { stage: "checking", done: None, total: None })
+        } else if let Some(rest) = text.strip_prefix("launcher content: warmed ") {
+            let mut words = rest.split_whitespace();
+            let done = words.next().and_then(|w| w.parse().ok());
+            let total = words.nth(1).and_then(|w| w.parse().ok());
+            Some(LaunchStep { stage: "content", done, total })
+        } else if text.contains(" ready, ") || text.contains("handler registered") {
+            Some(LaunchStep { stage: "starting", done: None, total: None })
+        } else {
+            None
+        };
+        if next.is_some() {
+            step = next;
+        }
+    }
+    step
+}
+
 /// Someone on your friends list (or asking to be), with what Luduvo says they're doing.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -735,6 +798,24 @@ mod tests {
         assert_eq!(single_presence(&json!({ "online": true })).state, "online");
         let g = groups(&json!({ "groups": [{ "group": { "id": 9, "name": "Builders", "member_count": 40 }, "role": { "name": "Owner" } }] }));
         assert_eq!((g[0].id, g[0].name.as_str(), g[0].members, g[0].role.as_str()), (9, "Builders", 40, "Owner"));
+    }
+
+    #[test]
+    fn follows_the_launcher_log() {
+        // Real lines from a first start.
+        let log = "2026-11-16T13:47:55.861Z I 421989 | update available: seq 0 -> 2000054000, version <none> -> 54\n\
+                   2026-11-16T13:47:58.214Z I 421989 | update applied: version=54 seq=2000054000\n\
+                   2026-11-16T13:48:03.185Z I 422142 | launcher content: warmed 50 of 1922 objects\n\
+                   2026-11-16T13:49:00.645Z W 422139 | launcher content: download failed for shaders/d3d12/x.json\n\
+                   2026-11-16T13:49:41.952Z I 422144 | launcher content: warmed 850 of 1922 objects\n";
+        let start = log_time_ms("2026-11-16T13:47:55.000Z").unwrap();
+        assert_eq!(launch_step(log, start), Some(LaunchStep { stage: "content", done: Some(850), total: Some(1922) }));
+        assert_eq!(launch_step(&log[..log.find("2026-11-16T13:48").unwrap()], start).unwrap().stage, "checking");
+        let ready = "2026-11-16T18:58:55.645Z I 821788 | launcher content: version 14 ready, 1922 names in /x\n";
+        assert_eq!(launch_step(ready, log_time_ms("2026-11-16T18:58:50.000Z").unwrap()).unwrap().stage, "starting");
+        // Lines from an earlier start don't count.
+        assert_eq!(launch_step(log, start + 10 * 60_000), None);
+        assert_eq!(log_time_ms("1970-01-01T00:00:01.500Z"), Some(1500));
     }
 
     #[test]
