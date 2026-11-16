@@ -644,6 +644,7 @@ pub fn base64_json(text: &str) -> Option<serde_json::Value> {
 }
 
 /// The field names (not values) of a JSON object, for describing an unfamiliar answer in development logs.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub fn shape_keys(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Object(m) => m.iter().map(|(k, v)| match v {

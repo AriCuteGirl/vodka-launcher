@@ -45,6 +45,8 @@ fn join_ids(ids: &[u64]) -> String {
 
 /// Roblox's "prove you're human first" answer: an id, a type (`captcha`, ...) and details to solve it with.
 #[derive(Debug, Clone)]
+// Only described in development logs for now.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub struct Challenge {
     pub kind: String,
     pub metadata: serde_json::Value,
