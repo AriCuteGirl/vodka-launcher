@@ -70,9 +70,23 @@ The rail on the far left switches to Luduvo. On Windows you can sign in, browse,
 **Play doesn't start Luduvo yet**: Vodka only knows where the Linux version is installed. Check that browsing and
 sign-in work (sign-in opens luduvo.com in your normal browser), and tell the owner where Luduvo is installed.
 
+## Closing games and performance settings (new)
+
+1. Start two games on two accounts. Close **one** Roblox window yourself (the X). Within a few seconds, does Vodka's
+   side panel drop only that game?
+2. Press **Close** in Vodka's side panel on the other game. Does exactly that window close?
+3. Does each running game show its memory use (like "1.2 GB") in the side panel?
+4. **Settings → Performance**: set Frame rate to **Unlimited** and press Save, then start a game. Does it run above
+   60 FPS (Shift+F5 in Roblox shows FPS)?
+5. Set **Graphics API** to **Vulkan** (or OpenGL), start a game. Shift+F2 in Roblox shows which one it uses.
+6. Add a FastFlag (for example `FFlagDebugDisplayFPS` = `True`), start a game. Vodka writes it into
+   `%LOCALAPPDATA%\Roblox\Versions\<version>\ClientSettings\ClientAppSettings.json`. Is it there?
+7. Set a **Memory safety limit** of 4 GB. Vodka closes a game that goes over it and says so.
+
 ## Not in the Windows version (on purpose)
 
-- No performance settings, per-game stats, Restart or Gather. These need Mocktail, which is Linux-only.
+- No per-game CPU or FPS readout, Restart or Gather. These need Mocktail, which is Linux-only.
+- No graphics backend, VSync, GameMode or update holding: those are Mocktail options.
 
 ## If something goes wrong
 

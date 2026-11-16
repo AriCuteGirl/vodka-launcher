@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Roblox profiles: click a friend (or Your profile in the account menu) to see their status with Join, friends, followers, about, their friends, games they made, favorites and groups.
+- Luduvo: Marketplace (search, categories, sort, like, favorite, buy after confirming the C$ price), a Friends page (add by username, requests, join, remove), an Avatar page (what you wear, your items, outfits) and profiles.
+- Luduvo friends in a game get a Join button.
+- Windows: each game is matched to its own Roblox window, so closing a window removes only that game, Close closes the right one, and memory use shows.
+- Windows: Performance settings: FPS, a new Graphics API choice (Direct3D 11, Vulkan, OpenGL), FastFlags, and a memory safety limit. Vodka writes them into Roblox's ClientAppSettings.json and keeps flags it didn't write.
+- Fixed: the game rail's Roblox icon did nothing after starting the installed app (it started on an empty path).
+- Fixed: Roblox friends lists with hidden or deleted accounts failed to load.
+- Running `vodka-launcher` from a terminal now prints errors from the window and game switches.
+
 ## 0.2.0 (2026-11-16)
 
 More than one game: a rail on the left switches between Roblox and Luduvo, each with its own pages, account and colour.
