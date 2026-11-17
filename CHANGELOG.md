@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-17)
+
+Luduvo Messages, playtime tracking, and a friends panel you can hide.
 
 - The friends panel on the right can be hidden with the small arrow at its top left and brought back the same way, for Roblox and Luduvo. Vodka remembers which way you left it.
 - Luduvo Messages, laid out like luduvo.com: your chats with search and unread counts on the left, the conversation on the right with day lines, replies, and new messages showing up within a few seconds. Start a chat with + or the Message button on a friend's profile. The sidebar shows how many chats are unread.
