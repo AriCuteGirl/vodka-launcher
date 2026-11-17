@@ -1133,6 +1133,9 @@ async fn luduvo_recent(app: AppHandle, state: State<'_, AppState>) -> Result<Vec
 /// Hands the launcher a join link and watches the game until it closes.
 fn run_luduvo(app: &AppHandle, state: &AppState, link: &str, place_id: u64, title: String) -> Result<luduvo::Running> {
     use tauri::Emitter;
+    // On Windows the launcher starts the game as its own program and exits; games already open aren't this one.
+    #[cfg(windows)]
+    let before = luduvo::game_pids();
     let mut child = luduvo::spawn(Some(link))?;
     let pid = child.id().unwrap_or_default();
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default();
@@ -1142,6 +1145,8 @@ fn run_luduvo(app: &AppHandle, state: &AppState, link: &str, place_id: u64, titl
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let _ = child.wait().await;
+        #[cfg(windows)]
+        let pid = follow_windows_game(&handle, pid, &before).await;
         let state = handle.state::<AppState>();
         {
             let mut slot = state.luduvo.running.lock().unwrap();
@@ -1153,6 +1158,45 @@ fn run_luduvo(app: &AppHandle, state: &AppState, link: &str, place_id: u64, titl
     });
     watch_luduvo_start(app.clone(), pid, started_at);
     Ok(running)
+}
+
+/// Windows: once the launcher exits, finds the game it started (a `LuduvoGame.exe` that wasn't running before),
+/// makes it the one Vodka shows and closes, and waits for it to end. Returns the pid now in the running record.
+#[cfg(windows)]
+async fn follow_windows_game(app: &AppHandle, launcher_pid: u32, before: &[u32]) -> u32 {
+    use tauri::Emitter;
+    let mut game = None;
+    for _ in 0..30 {
+        let fresh = tokio::task::spawn_blocking(luduvo::game_pids).await.unwrap_or_default();
+        if let Some(p) = fresh.into_iter().find(|p| !before.contains(p)) {
+            game = Some(p);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    let Some(game) = game else { return launcher_pid };
+    {
+        let state = app.state::<AppState>();
+        let mut slot = state.luduvo.running.lock().unwrap();
+        match slot.as_mut() {
+            Some(r) if r.pid == launcher_pid => {
+                r.pid = game;
+                r.stage = "playing".into();
+                r.done = None;
+                r.total = None;
+                r.playing_since.get_or_insert_with(playtime::now_secs);
+            }
+            _ => return launcher_pid,
+        }
+    }
+    let _ = app.emit("luduvo://changed", ());
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let alive = tokio::task::spawn_blocking(move || luduvo::is_game_process(game)).await.unwrap_or(false);
+        if !alive {
+            return game;
+        }
+    }
 }
 
 /// Follows a starting Luduvo game from its launcher log (updating, downloading content) until the launcher turns
@@ -1503,10 +1547,11 @@ fn luduvo_running(state: State<'_, AppState>) -> Option<luduvo::Running> {
 }
 
 #[tauri::command]
-fn luduvo_stop(state: State<'_, AppState>) -> Result<()> {
+async fn luduvo_stop(state: State<'_, AppState>) -> Result<()> {
     let running = state.luduvo.running.lock().unwrap().clone();
     match running {
-        Some(r) => luduvo::stop(r.pid),
+        // Closing can wait a few seconds for the game; not on the window's thread.
+        Some(r) => blocking(move || luduvo::stop(r.pid)).await,
         None => Ok(()),
     }
 }
