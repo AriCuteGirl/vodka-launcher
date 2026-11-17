@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Luduvo Avatar: each outfit has a ⋮ menu with Rename (right on the card), Update (replace it with what you're wearing now) and Delete, the last two after a confirmation.
 - Playtime, like Steam: Vodka counts how long you play each Roblox and Luduvo game you start from it. Each game's page shows the hours on record, the past two weeks and when you last played, and a new Playtime page (in each game's sidebar) lists them all, by recent or most played. Luduvo games start from Luduvo's own count, so time played before Vodka is included.
 
 ## 0.3.0 (2026-11-17)

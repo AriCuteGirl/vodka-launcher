@@ -1380,6 +1380,18 @@ async fn luduvo_save_outfit(state: State<'_, AppState>, name: String) -> Result<
 }
 
 #[tauri::command]
+async fn luduvo_rename_outfit(state: State<'_, AppState>, outfit_id: u64, name: String) -> Result<Vec<luduvo::Outfit>> {
+    state.luduvo.rename_outfit(outfit_id, &name).await?;
+    state.luduvo.outfits().await
+}
+
+#[tauri::command]
+async fn luduvo_update_outfit(state: State<'_, AppState>, outfit_id: u64) -> Result<Vec<luduvo::Outfit>> {
+    state.luduvo.update_outfit(outfit_id).await?;
+    state.luduvo.outfits().await
+}
+
+#[tauri::command]
 async fn luduvo_delete_outfit(state: State<'_, AppState>, outfit_id: u64) -> Result<Vec<luduvo::Outfit>> {
     state.luduvo.delete_outfit(outfit_id).await?;
     state.luduvo.outfits().await
@@ -1603,6 +1615,8 @@ pub fn run() {
             luduvo_wear_outfit,
             luduvo_save_outfit,
             luduvo_delete_outfit,
+            luduvo_rename_outfit,
+            luduvo_update_outfit,
             ui_log,
             luduvo_profile,
             luduvo_user_friends,

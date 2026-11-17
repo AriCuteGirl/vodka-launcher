@@ -667,6 +667,21 @@ impl Client {
         Ok(())
     }
 
+    pub async fn rename_outfit(&self, id: u64, name: &str) -> Result<()> {
+        let name: String = name.trim().chars().take(50).collect();
+        if name.is_empty() {
+            return Err(AppError::Other("Give the outfit a name first.".into()));
+        }
+        self.authed_with(Method::PUT, &format!("/me/outfits/{id}"), Some(&serde_json::json!({ "name": name }))).await?;
+        Ok(())
+    }
+
+    /// Replaces an outfit with what you're wearing now.
+    pub async fn update_outfit(&self, id: u64) -> Result<()> {
+        self.authed_with(Method::POST, &format!("/me/outfits/{id}/update"), Some(&serde_json::json!({}))).await?;
+        Ok(())
+    }
+
     pub async fn delete_outfit(&self, id: u64) -> Result<()> {
         self.authed(Method::DELETE, &format!("/me/outfits/{id}")).await?;
         Ok(())

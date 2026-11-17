@@ -749,6 +749,12 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_save_outfit":
       luduvoOutfits = [...luduvoOutfits, { id: 50 + luduvoOutfits.length, name: String(args.name), pictureUrl: null }];
       return luduvoOutfits;
+    case "luduvo_rename_outfit":
+      luduvoOutfits = luduvoOutfits.map((o) => (o.id === args.outfitId ? { ...o, name: String(args.name) } : o));
+      return luduvoOutfits;
+    case "luduvo_update_outfit":
+      await wait(300);
+      return luduvoOutfits;
     case "luduvo_delete_outfit":
       luduvoOutfits = luduvoOutfits.filter((o) => o.id !== args.outfitId);
       return luduvoOutfits;
