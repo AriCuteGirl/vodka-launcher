@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Messages at the bottom of the window ("Sent…", errors) now show on top of an open pop-up instead of behind its blur, everywhere in Vodka.
 - Luduvo Messages: send a gift from the gift button next to Send. Pick a store item, see the price and your Lunes, confirm, and it arrives in the chat. Gifts you get show as a card with Accept and Decline. Like on luduvo.com, free and limited items can't be gifted, and items that come in colours let you pick one (at that colour's price).
 - Luduvo's "untrusted account" refusal (gifts and other actions need an account at least 24 hours old with a verified email) is explained in full.
 - Luduvo errors that come as a short code are shown as words instead of "a response Vodka didn't understand".
