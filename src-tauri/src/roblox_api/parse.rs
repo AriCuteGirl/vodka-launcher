@@ -656,6 +656,87 @@ pub fn shape_keys(v: &serde_json::Value) -> String {
     }
 }
 
+/// The top of someone's profile.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub id: u64,
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    /// ISO date the account was made.
+    pub created: Option<String>,
+    pub verified: bool,
+    pub banned: bool,
+    pub avatar_url: Option<String>,
+    pub friends: Option<u64>,
+    pub followers: Option<u64>,
+    pub following: Option<u64>,
+    pub presence: Option<Presence>,
+}
+
+pub fn profile(body: &str) -> Result<Profile> {
+    let u: serde_json::Value = serde_json::from_str(body).map_err(|e| bad("profile", e))?;
+    let text = |k: &str| u.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+    let name = text("name");
+    let shown = text("displayName");
+    Ok(Profile {
+        id: u.get("id").and_then(|v| v.as_u64()).ok_or_else(|| AppError::Api("Roblox doesn't know that person".into()))?,
+        display_name: if shown.is_empty() { name.clone() } else { shown },
+        name,
+        description: text("description").trim().to_owned(),
+        created: u.get("created").and_then(|v| v.as_str()).map(str::to_owned),
+        verified: u.get("hasVerifiedBadge").and_then(|v| v.as_bool()).unwrap_or(false),
+        banned: u.get("isBanned").and_then(|v| v.as_bool()).unwrap_or(false),
+        avatar_url: None,
+        friends: None,
+        followers: None,
+        following: None,
+        presence: None,
+    })
+}
+
+/// `{"count": n}`.
+pub fn count(body: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(body).ok()?.get("count")?.as_u64()
+}
+
+/// A group someone is in, with their rank.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserGroup {
+    pub id: u64,
+    pub name: String,
+    pub members: u64,
+    pub verified: bool,
+    pub role: String,
+    pub icon_url: Option<String>,
+}
+
+/// Every group in `/v1/users/{id}/groups/roles`.
+pub fn user_groups(body: &str) -> Result<Vec<UserGroup>> {
+    let json: serde_json::Value = serde_json::from_str(body).map_err(|e| bad("groups", e))?;
+    Ok(json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|list| {
+            list.iter()
+                .filter_map(|m| {
+                    let g = m.get("group")?;
+                    Some(UserGroup {
+                        id: g.get("id")?.as_u64()?,
+                        name: g.get("name").and_then(|v| v.as_str()).unwrap_or("Group").to_owned(),
+                        members: g.get("memberCount").and_then(|v| v.as_u64()).unwrap_or(0),
+                        verified: g.get("hasVerifiedBadge").and_then(|v| v.as_bool()).unwrap_or(false),
+                        role: m.pointer("/role/name").and_then(|v| v.as_str()).unwrap_or_default().to_owned(),
+                        icon_url: None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 /// A Roblox group, and where you stand in it.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -938,12 +1019,13 @@ pub struct Person {
 
 /// The ids in a friends or friend-requests page. Roblox no longer includes names there.
 pub fn id_list(body: &str) -> Result<Vec<u64>> {
+    // Roblox lists hidden or deleted accounts with id -1 in other people's friends lists: skip them.
     #[derive(Deserialize)]
     struct Raw {
-        id: u64,
+        id: i64,
     }
     let page: Page<Raw> = serde_json::from_str(body).map_err(|e| bad("friends", e))?;
-    Ok(page.data.into_iter().map(|r| r.id).collect())
+    Ok(page.data.into_iter().filter_map(|r| u64::try_from(r.id).ok().filter(|id| *id > 0)).collect())
 }
 
 /// (username, display name) by user id, from the bulk user lookup.
@@ -1464,5 +1546,19 @@ mod tests {
         assert_eq!(v["actionType"], "Generic");
         assert_eq!(shape_keys(&v), "actionType=\"Generic\", unifiedCaptchaId");
         assert!(base64_json("not base64!").is_none());
+    }
+
+    #[test]
+    fn reads_a_profile_counts_and_groups() {
+        let p = profile(r#"{"description":" Hi! ","created":"2006-02-27T21:06:40.3Z","isBanned":false,"hasVerifiedBadge":true,"id":1,"name":"Roblox","displayName":""}"#).unwrap();
+        assert_eq!((p.id, p.name.as_str(), p.display_name.as_str(), p.description.as_str(), p.verified), (1, "Roblox", "Roblox", "Hi!", true));
+        assert_eq!(count(r#"{"count":16957233}"#), Some(16957233));
+        let g = user_groups(r#"{"data":[{"group":{"id":7,"name":"Wiki","memberCount":30,"hasVerifiedBadge":false},"role":{"name":"Admin","rank":254}}]}"#).unwrap();
+        assert_eq!((g[0].id, g[0].name.as_str(), g[0].members, g[0].role.as_str()), (7, "Wiki", 30, "Admin"));
+    }
+
+    #[test]
+    fn skips_hidden_friends_listed_as_minus_one() {
+        assert_eq!(id_list(r#"{"data":[{"id":5},{"id":-1},{"id":0},{"id":9}]}"#).unwrap(), vec![5, 9]);
     }
 }

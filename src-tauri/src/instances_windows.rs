@@ -2,14 +2,17 @@
 //! signed in as the chosen account with a one-time ticket.
 //!
 //! What's different from Linux: several games at once only after the user accepts the multi-instance
-//! warning (see `singleton`), no per-game CPU, memory or FPS, and no restart or gather. Whether the game is running is learned from Roblox's presence for the
-//! account, because the program Vodka starts is only Roblox's own launcher, which hands off and exits.
+//! warning (see `singleton`), no per-game CPU or FPS, and no restart or gather. The program Vodka starts is only
+//! Roblox's own launcher, which hands off and exits, so each game is matched to the `RobloxPlayerBeta.exe` process
+//! that appears after its launch (see `winclient`). That process is how Vodka knows the game ended, closes it, and
+//! reads its memory use; Vodka never opens or changes the process itself (only `tasklist` and `taskkill`).
 
 use crate::accounts;
 use crate::error::{AppError, Result};
 use crate::roblox_api::Game;
 use crate::settings::SavedAccount;
 use crate::windows_player;
+use crate::winclient;
 use serde::Serialize;
 use std::os::windows::process::CommandExt;
 use std::sync::{Arc, Mutex};
@@ -74,6 +77,24 @@ mod singleton {
     }
 }
 
+/// Every running Roblox client, with its memory use.
+fn roblox_processes() -> Vec<winclient::Process> {
+    std::process::Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/NH", "/FO", "CSV"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| winclient::parse_tasklist(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
+
+fn kill_pid(pid: u32) -> bool {
+    std::process::Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// Whether any Roblox client is running, whoever started it.
 fn roblox_running() -> bool {
     std::process::Command::new("tasklist")
@@ -124,6 +145,13 @@ struct Instance {
     absent_checks: u8,
     /// Sent in the launch link; finds this game's Roblox process when only this one should close.
     tracker: u64,
+    /// This game's Roblox process, once it appeared.
+    pid: Option<u32>,
+    /// Roblox processes already running at launch; never this game's.
+    before: Vec<u32>,
+    memory_bytes: u64,
+    /// Close the game when its memory goes over this; `None` is no limit.
+    memory_limit_mb: Option<u32>,
 }
 
 #[derive(Default)]
@@ -132,6 +160,8 @@ pub struct Manager {
     instances: Vec<Instance>,
     /// Names of games given up on since the last `take_given_up`, so the user can be told.
     given_up: Vec<String>,
+    /// Games Vodka closed for going over their memory limit, to tell the user.
+    over_memory: Vec<String>,
 }
 
 pub type SharedManager = Arc<Mutex<Manager>>;
@@ -163,7 +193,7 @@ pub async fn launch(
     account: SavedAccount,
     game: Game,
     uri: String,
-    _env: Vec<(&'static str, String)>,
+    env: Vec<(&'static str, String)>,
     _auto_rejoin: bool,
 ) -> Result<u32> {
     let multi = app
@@ -192,6 +222,17 @@ pub async fn launch(
             }
         }
     }
+    let setting = |name: &str| env.iter().find(|(k, _)| *k == name).map(|(_, v)| v.clone());
+    // FastFlags, FPS and the graphics API go in Roblox's own flag file, read when the client starts.
+    let mut flags: std::collections::BTreeMap<String, String> =
+        setting("MOCKTAIL_CLIENT_SETTINGS_OVERRIDES_JSON").and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+    flags.extend(winclient::option_flags(setting("MOCKTAIL_FRAME_RATE_LIMIT").as_deref(), setting("VODKA_WINDOWS_RENDERER").as_deref()));
+    if let Ok(dir) = app.path().app_config_dir() {
+        let flags = flags.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || write_flags(&dir, &flags)).await;
+    }
+    let memory_limit_mb = setting("MOCKTAIL_MEMORY_LIMIT_MB").and_then(|v| v.parse::<u32>().ok()).filter(|mb| *mb > 0);
+    let before: Vec<u32> = tauri::async_runtime::spawn_blocking(roblox_processes).await.unwrap_or_default().iter().map(|p| p.pid).collect();
     let to = windows_player::destination(&uri).ok_or_else(|| AppError::Launch("Vodka couldn't work out where that link goes.".into()))?;
     let account_id = account.id;
     let cookie = tauri::async_runtime::spawn_blocking(move || accounts::load_session(account_id))
@@ -214,7 +255,19 @@ pub async fn launch(
     let mut m = manager.lock().unwrap();
     m.next_id += 1;
     let id = m.next_id;
-    m.instances.push(Instance { id, account, game, started_at_ms: now, playing: false, absent_checks: 0, tracker });
+    m.instances.push(Instance {
+        id,
+        account,
+        game,
+        started_at_ms: now,
+        playing: false,
+        absent_checks: 0,
+        tracker,
+        pid: None,
+        before,
+        memory_bytes: 0,
+        memory_limit_mb,
+    });
     drop(m);
     let _ = app.emit("instances://changed", ());
     Ok(id)
@@ -225,12 +278,18 @@ pub fn stop(manager: &SharedManager, id: u32, restart: bool) -> Result<()> {
     if restart {
         return Err(AppError::Other("Restart isn't available in the Windows version yet. Close the game and press Play again.".into()));
     }
-    let (tracker, others) = {
+    let (tracker, pid, others) = {
         let mut m = manager.lock().unwrap();
-        let tracker = m.instances.iter().find(|i| i.id == id).map(|i| i.tracker);
+        let found = m.instances.iter().find(|i| i.id == id).map(|i| (i.tracker, i.pid));
         m.instances.retain(|i| i.id != id);
-        (tracker, m.instances.len())
+        (found.map(|f| f.0), found.and_then(|f| f.1), m.instances.len())
     };
+    // The process Vodka matched to this game: close exactly that one.
+    if let Some(pid) = pid
+        && kill_pid(pid)
+    {
+        return Ok(());
+    }
     // Close only the client started with this game's link.
     if let Some(tracker) = tracker {
         let script = format!(
@@ -280,6 +339,8 @@ pub fn note_presence(manager: &SharedManager, id: u32, in_game: bool) -> bool {
                 inst.started_at_ms = now;
             }
             inst.absent_checks = 0;
+        } else if inst.pid.is_some() {
+            // Its process is still there (see `sync`), so it's still running whatever presence says.
         } else if inst.playing {
             inst.absent_checks = inst.absent_checks.saturating_add(1);
             ended = inst.absent_checks >= 2;
@@ -295,6 +356,65 @@ pub fn note_presence(manager: &SharedManager, id: u32, in_game: bool) -> bool {
         m.instances.retain(|i| i.id != id);
     }
     false
+}
+
+/// Matches games to Roblox processes, drops games whose process is gone, and closes any game over its memory limit.
+fn sync(manager: &SharedManager) {
+    let running = roblox_processes();
+    let mut m = manager.lock().unwrap();
+    let tracked: Vec<winclient::Tracked> = m.instances.iter().map(|i| winclient::Tracked { pid: i.pid, before: i.before.clone() }).collect();
+    let outcomes = winclient::match_processes(&tracked, &running);
+    let mut ended = Vec::new();
+    let mut over = Vec::new();
+    for (inst, outcome) in m.instances.iter_mut().zip(outcomes) {
+        match outcome {
+            winclient::Outcome::Ended => ended.push(inst.id),
+            winclient::Outcome::Running(pid) => {
+                inst.pid = pid;
+                if let Some(pid) = pid {
+                    inst.playing = true;
+                    inst.memory_bytes = running.iter().find(|p| p.pid == pid).map(|p| p.memory_bytes).unwrap_or(0);
+                    if let Some(limit) = inst.memory_limit_mb
+                        && inst.memory_bytes > u64::from(limit) * 1024 * 1024
+                        && kill_pid(pid)
+                    {
+                        over.push((inst.id, format!("{} ({} MB limit)", inst.game.name, limit)));
+                    }
+                }
+            }
+        }
+    }
+    m.instances.retain(|i| !ended.contains(&i.id) && !over.iter().any(|(id, _)| *id == i.id));
+    m.over_memory.extend(over.into_iter().map(|(_, name)| name));
+}
+
+/// Games Vodka closed for going over their memory limit since the last call.
+pub fn take_over_memory(manager: &SharedManager) -> Vec<String> {
+    std::mem::take(&mut manager.lock().unwrap().over_memory)
+}
+
+/// Writes Vodka's FastFlags into every installed Roblox client's `ClientSettings\ClientAppSettings.json`, keeping
+/// flags someone else put there. Roblox reads the file when a client starts.
+fn write_flags(config_dir: &std::path::Path, flags: &std::collections::BTreeMap<String, String>) {
+    let owned_file = config_dir.join("windows-fflags-owned.json");
+    let previous: Vec<String> = std::fs::read_to_string(&owned_file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let Some(versions) = std::env::var_os("LOCALAPPDATA").map(|d| std::path::PathBuf::from(d).join("Roblox").join("Versions")) else { return };
+    let Ok(entries) = std::fs::read_dir(&versions) else { return };
+    let mut owned = previous.clone();
+    for entry in entries.flatten() {
+        if !entry.path().join("RobloxPlayerBeta.exe").is_file() {
+            continue;
+        }
+        let dir = entry.path().join("ClientSettings");
+        let file = dir.join("ClientAppSettings.json");
+        let existing = std::fs::read_to_string(&file).unwrap_or_default();
+        let (text, now_owned) = winclient::merge_flag_file(&existing, &previous, flags);
+        if std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, text)).is_ok() {
+            owned = now_owned;
+        }
+    }
+    let _ = std::fs::create_dir_all(config_dir);
+    let _ = std::fs::write(&owned_file, serde_json::to_string(&owned).unwrap_or_else(|_| "[]".into()));
 }
 
 /// Games that never started since the last call. Roblox's own error window (if any) says why.
@@ -317,6 +437,9 @@ pub fn running_account_ids(manager: &SharedManager) -> Vec<u64> {
 }
 
 pub fn list(manager: &SharedManager) -> Vec<InstanceView> {
+    if !manager.lock().unwrap().instances.is_empty() {
+        sync(manager);
+    }
     manager
         .lock()
         .unwrap()
@@ -331,7 +454,7 @@ pub fn list(manager: &SharedManager) -> Vec<InstanceView> {
             phase: if i.playing { "playing" } else { "starting" },
             started_at_ms: i.started_at_ms,
             cpu_percent: 0.0,
-            memory_bytes: 0,
+            memory_bytes: i.memory_bytes,
             fps: None,
             log: Vec::new(),
         })

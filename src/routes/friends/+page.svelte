@@ -129,17 +129,19 @@
           <ul class="cards">
             {#each group.people as f (f.id)}
               <li class="card glass" class:dim={f.presence.kind === "offline"}>
-                <Avatar
-                  name={f.displayName}
-                  src={f.avatarUrl}
-                  size={44}
-                  status={f.presence.kind === "in_game" ? "playing" : f.presence.kind === "offline" ? undefined : "online"}
-                />
-                <div class="who">
-                  <b>{f.displayName}</b>
-                  <span class="faint">@{f.name}</span>
-                  <span class="status" class:live={f.presence.kind !== "offline"}>{status(f)}</span>
-                </div>
+                <a class="open" href="/users/{f.id}" title="Open {f.displayName}'s profile">
+                  <Avatar
+                    name={f.displayName}
+                    src={f.avatarUrl}
+                    size={44}
+                    status={f.presence.kind === "in_game" ? "playing" : f.presence.kind === "offline" ? undefined : "online"}
+                  />
+                  <div class="who">
+                    <b>{f.displayName}</b>
+                    <span class="faint">@{f.name}</span>
+                    <span class="status" class:live={f.presence.kind !== "offline"}>{status(f)}</span>
+                  </div>
+                </a>
                 {#if f.presence.kind === "in_game"}
                   <div class="actions">
                     {#if f.presence.gameId}
@@ -159,6 +161,19 @@
 </div>
 
 <style>
+  .open {
+    display: flex;
+    align-items: center;
+    gap: inherit;
+    flex: 1;
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+    border-radius: var(--r-sm);
+  }
+  .open:hover b {
+    color: var(--frost);
+  }
   .friends {
     display: grid;
     gap: var(--s-5);

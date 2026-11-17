@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { chat } from "$lib/chat.svelte";
-  import { gameOf } from "$lib/games";
+  import { gameOf, pathOf } from "$lib/games";
   import Icon from "./Icon.svelte";
 
   // Each game has its own pages; the rail on the left picks the game.
@@ -18,7 +18,10 @@
     }
   }
   // A game's home is only active on itself; other pages also cover what is under them.
-  const active = (href: string) => (href === game.home || href === "/" ? page.url.pathname === href : page.url.pathname.startsWith(href));
+  const active = (href: string) => {
+    const here = pathOf(page.url.pathname);
+    return href === game.home || href === "/" ? here === href : here.startsWith(href);
+  };
 </script>
 
 <nav class="sidebar" class:open aria-label="{game.name} pages">

@@ -1,39 +1,60 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { api } from "$lib/api";
   import { page } from "$app/state";
-  import { GAMES, gameOf, type GameSection } from "$lib/games";
+  import { GAMES, gameOf, pathOf, type GameSection } from "$lib/games";
   import { luduvo } from "$lib/luduvo.svelte";
   import GameLogo from "./GameLogo.svelte";
 
   // The thin column of games left of the page list, like a game library. Switching keeps your place in each game.
   const current = $derived(gameOf(page.url.pathname));
-  const lastPage: Record<string, string> = {};
+  let lastPage = $state<Record<string, string>>({});
   $effect(() => {
-    lastPage[current.id] = page.url.pathname + page.url.search;
+    const here = pathOf(page.url.pathname) + page.url.search;
+    // Only remember a page that really belongs to the game it's filed under.
+    if (gameOf(page.url.pathname).id === current.id) lastPage[current.id] = here;
   });
 
-  function pick(game: GameSection) {
-    if (game.id === current.id) {
-      void goto(game.home);
-      return;
-    }
-    void goto(lastPage[game.id] ?? game.home);
+  // Where each icon goes: the game's home when you're already in it, otherwise where you left it.
+  const target = (game: GameSection) => (game.id === current.id ? game.home : lastPage[game.id] || game.home);
+
+  // The icons are real links, so switching is ordinary navigation. If the in-app switch fails anyway (an error while
+  // the page loads), load it in full rather than leave the click doing nothing.
+  function go(e: MouseEvent, game: GameSection) {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    const to = target(game);
+    const from = pathOf(page.url.pathname);
+    void api.uiLog("info", `rail: ${game.name} clicked on ${from}, going to ${to}`);
+    goto(to)
+      .then(() => {
+        // goto can finish without moving (another navigation won); check where we ended up.
+        if (pathOf(page.url.pathname) === from && to.split("?")[0] !== from) {
+          void api.uiLog("warn", `rail: still on ${from} after going to ${to}; loading it in full`);
+          location.href = to;
+        }
+      })
+      .catch((err) => {
+        void api.uiLog("error", `rail: switching to ${to} failed: ${err instanceof Error ? err.message : String(err)}`);
+        location.href = to;
+      });
   }
 </script>
 
 <nav class="games" aria-label="Games">
   {#each GAMES as game (game.id)}
-    <button
+    <a
       class="game {game.id}"
       class:active={game.id === current.id}
+      href={target(game)}
       aria-current={game.id === current.id ? "true" : undefined}
       aria-label={game.id === "luduvo" && luduvo.playing ? `${game.name}, playing ${luduvo.playing.title}` : game.name}
-      onclick={() => pick(game)}
+      onclick={(e) => go(e, game)}
     >
       {#if game.id === "luduvo" && luduvo.playing}<i class="live" aria-hidden="true"></i>{/if}
       <span class="mark" aria-hidden="true"><GameLogo game={game.id} size={game.id === "roblox" ? 20 : 18} /></span>
       <span class="tip" aria-hidden="true">{game.name}</span>
-    </button>
+    </a>
   {/each}
 </nav>
 
@@ -59,6 +80,7 @@
     border-radius: 12px;
     background: none;
     cursor: pointer;
+    text-decoration: none;
   }
   .mark {
     display: grid;

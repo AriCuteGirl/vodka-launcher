@@ -197,17 +197,29 @@ pub fn private_code(pasted: &str) -> Option<String> {
     ((4..=128).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')).then(|| code.to_owned())
 }
 
-/// A small headshot from `headshot_key` (`headshots/<user>/<hash>.png`) on Luduvo's asset host.
-fn headshot(v: &Value) -> Option<String> {
+/// A headshot from `headshot_key` (a path on Luduvo's asset host, e.g. `headshots/<user>/<hash>.png`), at `size`
+/// pixels when Luduvo keeps sized copies.
+fn headshot_sized(v: &Value, size: u32) -> Option<String> {
     let key = v.get("headshot_key")?.as_str()?;
-    let safe = key.starts_with("headshots/") && key.ends_with(".png") && !key.contains("..") && key.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b));
+    let key = key.strip_prefix("https://assets.luduvo.com/").unwrap_or(key).trim_start_matches('/');
+    let safe = !key.is_empty() && !key.contains("..") && key.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b));
     if !safe {
         return None;
     }
     let sized = v.get("headshot_has_variants").and_then(Value::as_bool).unwrap_or(false);
-    let path = if sized { format!("{}/96.png", &key[..key.len() - 4]) } else { key.to_owned() };
+    let path = match key.strip_suffix(".png") {
+        Some(stem) if sized => format!("{stem}/{size}.png"),
+        _ => key.to_owned(),
+    };
     asset_url(Some(&Value::String(format!("https://assets.luduvo.com/{path}"))))
 }
+
+fn headshot(v: &Value) -> Option<String> {
+    headshot_sized(v, 96)
+}
+
+/// The six body parts a bundle can cover.
+pub const BODY_PARTS: [&str; 6] = ["head", "torso", "left_arm", "right_arm", "left_leg", "right_leg"];
 
 pub fn servers(v: &Value) -> Vec<Server> {
     let list = v.as_array().or_else(|| v.get("servers").and_then(Value::as_array));
@@ -230,6 +242,377 @@ pub fn servers(v: &Value) -> Vec<Server> {
             Some(Server { id, playing: num(s, "player_count"), max_players: num(s, "max_players"), players })
         })
         .collect()
+}
+
+/// One thing in Luduvo's store.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreItem {
+    pub id: u64,
+    pub name: String,
+    pub description: String,
+    pub creator: String,
+    /// C$; `None` when it isn't for sale.
+    pub price: Option<u64>,
+    pub limited: bool,
+    pub asset_type: String,
+    pub slot: String,
+    pub picture_url: Option<String>,
+    pub sales: u64,
+    pub likes: u64,
+    pub dislikes: u64,
+    /// Only on the item's own page.
+    pub owners: Option<u64>,
+    /// 1 liked, -1 disliked, 0 not rated; only on the item's own page when signed in.
+    pub my_vote: i64,
+    /// Ends sale at this Unix time, for timed items.
+    pub expires_at: Option<u64>,
+}
+
+pub fn store_item(v: &Value) -> Option<StoreItem> {
+    let id = v.get("id").and_then(Value::as_u64)?;
+    let on_sale = v.get("is_on_sale").map(|x| x.as_bool().unwrap_or(x.as_u64() == Some(1))).unwrap_or(true);
+    let rating = v.get("rating");
+    Some(StoreItem {
+        id,
+        name: { let n = text(v, "name"); if n.is_empty() { format!("Item {id}") } else { n } },
+        description: text(v, "description"),
+        creator: text(v, "creator_username"),
+        price: if on_sale { v.get("price").and_then(Value::as_u64) } else { None },
+        limited: v.get("is_limited").map(|x| x.as_bool().unwrap_or(x.as_u64() == Some(1))).unwrap_or(false),
+        asset_type: text(v, "asset_type"),
+        slot: text(v, "slot"),
+        picture_url: asset_url(v.get("thumbnail_url")),
+        sales: num(v, "sales_count"),
+        likes: rating.map(|r| num(r, "thumbs_up")).unwrap_or_else(|| num(v, "thumbs_up")),
+        dislikes: rating.map(|r| num(r, "thumbs_down")).unwrap_or_else(|| num(v, "thumbs_down")),
+        owners: v.get("owners_count").and_then(Value::as_u64),
+        my_vote: rating.and_then(|r| r.get("user_vote")).and_then(Value::as_i64).unwrap_or(0).signum(),
+        expires_at: v.get("expires_at").and_then(Value::as_u64),
+    })
+}
+
+/// A page of the store: `{"items": [...], "total": n}`.
+pub fn store_page(v: &Value) -> (Vec<StoreItem>, u64) {
+    let items = v.get("items").and_then(Value::as_array).map(|l| l.iter().filter_map(store_item).collect()).unwrap_or_default();
+    (items, num(v, "total"))
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreCategory {
+    pub asset_type: String,
+    pub slot: String,
+    pub name: String,
+}
+
+pub fn store_categories(v: &Value) -> Vec<StoreCategory> {
+    v.as_array()
+        .or_else(|| v.get("categories").and_then(Value::as_array))
+        .map(|l| {
+            l.iter()
+                .map(|c| StoreCategory { asset_type: text(c, "asset_type"), slot: text(c, "slot"), name: text(c, "display_name") })
+                .filter(|c| !c.name.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Something you own or wear: an item and which variant of it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnedItem {
+    pub id: u64,
+    pub variant: u64,
+    pub name: String,
+    pub asset_type: String,
+    pub slot: String,
+    /// Every slot it takes: a bundle covers up to six body parts, anything else one.
+    pub slots: Vec<String>,
+    pub picture_url: Option<String>,
+    /// For a colour variant: its name ("Blue") and colour (`#AABBCC`).
+    pub variant_name: Option<String>,
+    pub variant_color: Option<String>,
+}
+
+/// An entry from the inventory or the equipped list. Entries may be flat or wrap the item (`{"item": {...}}`),
+/// and name the item `item_id` or `id`.
+pub fn owned_item(v: &Value) -> Option<OwnedItem> {
+    let inner = v.get("item").filter(|i| i.is_object()).unwrap_or(v);
+    let id = v.get("item_id").and_then(Value::as_u64).or_else(|| inner.get("id").and_then(Value::as_u64)).filter(|id| *id > 0)?;
+    let pick = |k: &str| {
+        let t = text(inner, k);
+        if t.is_empty() { text(v, k) } else { t }
+    };
+    // Inventory entries call it `item_name`; profile and store entries `name`.
+    let name = Some(pick("name")).filter(|n| !n.is_empty()).unwrap_or_else(|| pick("item_name"));
+    let asset_type = pick("asset_type");
+    let listed: Vec<String> = v.get("slots").and_then(Value::as_array).map(|s| s.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
+    let one = pick("slot");
+    let slot = if one.is_empty() { listed.first().cloned().unwrap_or_default() } else { one };
+    let slots = if !listed.is_empty() {
+        listed
+    } else if asset_type == "avatar_bundle" {
+        BODY_PARTS.iter().map(|p| (*p).to_owned()).collect()
+    } else {
+        match asset_type.as_str() {
+            "face" => vec!["face_decal".to_owned()],
+            "flat_shirt" => vec!["shirt".to_owned()],
+            "flat_pant" => vec!["pants".to_owned()],
+            _ if !slot.is_empty() => vec![slot.clone()],
+            _ => vec![],
+        }
+    };
+    // A variant you own may have its own picture.
+    let variant_picture = inner
+        .get("variant")
+        .and_then(|x| x.get("thumbnail_key"))
+        .and_then(Value::as_str)
+        .filter(|k| !k.contains("..") && k.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b)))
+        .and_then(|k| asset_url(Some(&Value::String(format!("https://assets.luduvo.com/{}", k.trim_start_matches('/'))))));
+    Some(OwnedItem {
+        id,
+        variant: v.get("variant_index").and_then(Value::as_u64).unwrap_or(0),
+        name: if name.is_empty() { format!("Item {id}") } else { name },
+        asset_type,
+        slot,
+        slots,
+        picture_url: variant_picture.or_else(|| asset_url(inner.get("thumbnail_url"))).or_else(|| asset_url(v.get("thumbnail_url"))),
+        variant_name: None,
+        variant_color: None,
+    })
+}
+
+/// Any list of owned or worn items: `{"items": [...]}`, `{"equipped": [...]}`, `{"inventory": [...]}` or a bare array.
+pub fn owned_list(v: &Value) -> Vec<OwnedItem> {
+    let list = ["equipped_items", "items", "equipped", "inventory", "data"].iter().find_map(|k| v.get(*k).and_then(Value::as_array)).or_else(|| v.as_array());
+    let mut seen = std::collections::HashSet::new();
+    list.map(|l| l.iter().filter_map(owned_item).filter(|i| seen.insert((i.id, i.variant))).collect()).unwrap_or_default()
+}
+
+/// One colour of an item, from `/items/{id}/variants`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variant {
+    pub index: u64,
+    pub name: String,
+    /// `#RRGGBB`, only when it is one.
+    pub color: Option<String>,
+    pub picture_url: Option<String>,
+}
+
+pub fn variants(v: &Value) -> Vec<Variant> {
+    let safe_key = |k: &str| {
+        let k = k.trim_start_matches('/');
+        (!k.is_empty() && !k.contains("..") && k.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))).then(|| k.to_owned())
+    };
+    v.get("variants")
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|x| {
+                    Some(Variant {
+                        index: x.get("variant_index")?.as_u64()?,
+                        name: text(x, "name"),
+                        color: x
+                            .get("hex_code")
+                            .and_then(Value::as_str)
+                            .filter(|h| h.len() == 7 && h.starts_with('#') && h[1..].bytes().all(|b| b.is_ascii_hexdigit()))
+                            .map(str::to_owned),
+                        picture_url: x
+                            .get("thumbnail_key")
+                            .and_then(Value::as_str)
+                            .and_then(safe_key)
+                            .and_then(|k| asset_url(Some(&Value::String(format!("https://assets.luduvo.com/{k}"))))),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Outfit {
+    pub id: u64,
+    pub name: String,
+    pub picture_url: Option<String>,
+}
+
+pub fn outfits(v: &Value) -> Vec<Outfit> {
+    v.get("outfits")
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|o| Some(Outfit { id: o.get("id")?.as_u64()?, name: text(o, "name"), picture_url: headshot_sized(o, 240) }))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Someone's Luduvo profile.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub id: u64,
+    pub name: String,
+    pub display_name: String,
+    pub bio: String,
+    /// Their short status line, when set.
+    pub status: String,
+    pub tier: String,
+    /// Unix seconds.
+    pub member_since: Option<u64>,
+    pub last_active: Option<u64>,
+    pub friends: Option<u64>,
+    pub places: Option<u64>,
+    pub items: Option<u64>,
+    pub friends_hidden: bool,
+    pub badges: Vec<String>,
+    pub wearing: Vec<OwnedItem>,
+    pub headshot_url: Option<String>,
+    /// Filled in separately: the full-body picture and what they're doing.
+    pub picture_url: Option<String>,
+    pub state: String,
+    pub place_id: Option<u64>,
+    pub place_title: Option<String>,
+    pub joinable: bool,
+}
+
+pub fn profile(v: &Value) -> Option<Profile> {
+    let id = v.get("user_id").or_else(|| v.get("id")).and_then(Value::as_u64)?;
+    let name = text(v, "username");
+    let shown = text(v, "display_name");
+    Some(Profile {
+        id,
+        display_name: if shown.is_empty() { name.clone() } else { shown },
+        name,
+        bio: text(v, "bio"),
+        status: text(v, "status"),
+        tier: text(v, "tier"),
+        member_since: v.get("member_since").and_then(Value::as_u64),
+        last_active: v.get("last_active").and_then(Value::as_u64),
+        friends: v.get("friend_count").and_then(Value::as_u64),
+        places: v.get("place_count").and_then(Value::as_u64),
+        items: v.get("item_count").and_then(Value::as_u64),
+        friends_hidden: v.get("friends_hidden").and_then(Value::as_bool).unwrap_or(false),
+        badges: v.get("badges").and_then(Value::as_array).map(|b| b.iter().map(|x| text(x, "name")).filter(|n| !n.is_empty()).collect()).unwrap_or_default(),
+        wearing: owned_list(v),
+        headshot_url: asset_url(v.get("headshot_url")),
+        picture_url: None,
+        state: "offline".into(),
+        place_id: None,
+        place_title: None,
+        joinable: false,
+    })
+}
+
+/// `/users/{id}/presence`: `{"online": true, "state": "in_game", "joinable": true, "place": {...}}`.
+pub fn single_presence(v: &Value) -> Presence {
+    let state = ["state", "status"].iter().map(|k| text(v, k)).find(|s| !s.is_empty()).unwrap_or_else(|| {
+        if v.get("online").and_then(Value::as_bool).unwrap_or(false) { "online".into() } else { "offline".into() }
+    });
+    let place = v.get("place").filter(|x| x.is_object());
+    let place_id = v.get("place_id").and_then(Value::as_u64).or_else(|| place.and_then(|x| x.get("id")).and_then(Value::as_u64));
+    let title = [text(v, "place_title"), place.map(|x| text(x, "title")).unwrap_or_default()].into_iter().find(|t| !t.is_empty());
+    let joinable = v.get("joinable").and_then(Value::as_bool).unwrap_or(state == "in_game" && place_id.is_some());
+    Presence { state, place_id, place_title: title, joinable }
+}
+
+/// A group someone is in.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    pub id: u64,
+    pub name: String,
+    pub members: u64,
+    pub role: String,
+    pub icon_url: Option<String>,
+}
+
+pub fn groups(v: &Value) -> Vec<Group> {
+    v.get("groups")
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|m| {
+                    let g = m.get("group").filter(|g| g.is_object()).unwrap_or(m);
+                    Some(Group {
+                        id: g.get("id").or_else(|| m.get("group_id")).and_then(Value::as_u64)?,
+                        name: text(g, "name"),
+                        members: g.get("member_count").or_else(|| g.get("members")).and_then(Value::as_u64).unwrap_or(0),
+                        role: [text(m, "role_name"), m.get("role").map(|r| if r.is_object() { text(r, "name") } else { r.as_str().unwrap_or_default().to_owned() }).unwrap_or_default()]
+                            .into_iter()
+                            .find(|r| !r.is_empty())
+                            .unwrap_or_default(),
+                        icon_url: asset_url(g.get("icon_url")).or_else(|| asset_url(g.get("thumbnail_url"))),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Where a starting game is, read from Luduvo's launcher log.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchStep {
+    /// `checking`, `updating`, `content`, `starting`.
+    pub stage: &'static str,
+    pub done: Option<u64>,
+    pub total: Option<u64>,
+}
+
+/// `2026-11-16T13:47:55.861Z` as Unix milliseconds.
+fn log_time_ms(stamp: &str) -> Option<u64> {
+    let b = stamp.as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[10] != b'T' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| stamp.get(r)?.parse::<i64>().ok();
+    let (y, m, d) = (n(0..4)?, n(5..7)?, n(8..10)?);
+    let (h, mi, sec) = (n(11..13)?, n(14..16)?, n(17..19)?);
+    let ms = if b.get(19) == Some(&b'.') { n(20..23).unwrap_or(0) } else { 0 };
+    // Days from 1970-01-01 to y-m-d (proleptic Gregorian).
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(((days * 24 + h) * 60 + mi) * 60_000 + sec * 1000 + ms).ok()
+}
+
+/// The latest step in Luduvo's launcher log written at or after `since_ms` (Unix milliseconds); `None` before it
+/// wrote anything for this start.
+pub fn launch_step(log: &str, since_ms: u64) -> Option<LaunchStep> {
+    let mut step = None;
+    for line in log.lines() {
+        let Some(when) = line.split_whitespace().next().and_then(log_time_ms) else { continue };
+        // A little slack for the two clocks.
+        if when + 2000 < since_ms {
+            continue;
+        }
+        let text = line.split_once(" | ").map(|(_, t)| t).unwrap_or(line);
+        let next = if text.starts_with("update available") || text.starts_with("downloading") {
+            Some(LaunchStep { stage: "updating", done: None, total: None })
+        } else if text.starts_with("update applied") || text.contains("up to date") || text.contains("update applied") {
+            Some(LaunchStep { stage: "checking", done: None, total: None })
+        } else if let Some(rest) = text.strip_prefix("launcher content: warmed ") {
+            let mut words = rest.split_whitespace();
+            let done = words.next().and_then(|w| w.parse().ok());
+            let total = words.nth(1).and_then(|w| w.parse().ok());
+            Some(LaunchStep { stage: "content", done, total })
+        } else if text.contains(" ready, ") || text.contains("handler registered") {
+            Some(LaunchStep { stage: "starting", done: None, total: None })
+        } else {
+            None
+        };
+        if next.is_some() {
+            step = next;
+        }
+    }
+    step
 }
 
 /// Someone on your friends list (or asking to be), with what Luduvo says they're doing.
@@ -293,7 +676,9 @@ pub fn presence(v: &Value) -> std::collections::HashMap<u64, Presence> {
             let place = p.get("place").filter(|x| x.is_object());
             let place_id = p.get("place_id").and_then(Value::as_u64).or_else(|| place.and_then(|x| x.get("id")).and_then(Value::as_u64));
             let title = [text(p, "place_title"), text(p, "game_title"), place.map(|x| text(x, "title")).unwrap_or_default()].into_iter().find(|t| !t.is_empty());
-            Some((id, Presence { state, place_id, place_title: title, joinable: p.get("joinable").and_then(Value::as_bool).unwrap_or(false) }))
+            // The friends-list presence doesn't say `joinable`; someone in a game is, and Luduvo refuses the join if not.
+            let joinable = p.get("joinable").and_then(Value::as_bool).unwrap_or(state == "in_game" && place_id.is_some());
+            Some((id, Presence { state, place_id, place_title: title, joinable }))
         })
         .collect()
 }
@@ -401,6 +786,9 @@ mod tests {
         assert_eq!(p[&3], Presence { state: "in_game".into(), place_id: Some(2869), place_title: Some("BoomBox!".into()), joinable: true });
         assert_eq!(p[&4].state, "online");
         assert!(!p[&4].joinable);
+        // The real friends-list answer: a place, no joinable field.
+        let real = presence(&json!({ "presence": [{ "user_id": 9, "state": "in_game", "place": { "id": 77, "title": "Tower Defense Simulator!" } }] }));
+        assert_eq!((real[&9].place_id, real[&9].place_title.as_deref(), real[&9].joinable), (Some(77), Some("Tower Defense Simulator!"), true));
     }
 
     #[test]
@@ -437,6 +825,86 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_store() {
+        // Trimmed from real /store and /store/{id} answers.
+        let page = json!({ "items": [
+            { "id": 1996, "creator_username": "Luduvo", "name": "???", "price": 42, "is_on_sale": 1, "is_limited": 0, "asset_type": "accessory", "slot": "hat",
+              "thumbnail_url": "https://assets.luduvo.com/items/1996/th.png", "sales_count": 371, "thumbs_up": 62, "thumbs_down": 20, "expires_at": 1821510000 },
+            { "id": 7, "name": "Old hat", "price": 10, "is_on_sale": 0 }
+        ], "total": 1803 });
+        let (items, total) = store_page(&page);
+        assert_eq!(total, 1803);
+        assert_eq!((items[0].id, items[0].price, items[0].creator.as_str(), items[0].sales, items[0].slot.as_str()), (1996, Some(42), "Luduvo", 371, "hat"));
+        assert_eq!(items[1].price, None, "off sale has no price");
+        let one = store_item(&json!({ "id": 1996, "price": 42, "is_on_sale": 1, "owners_count": 370, "rating": { "thumbs_up": 62, "thumbs_down": 20, "user_vote": 1 } })).unwrap();
+        assert_eq!((one.owners, one.my_vote, one.likes), (Some(370), 1, 62));
+        let cats = store_categories(&json!([{ "asset_type": "accessory", "slot": "hat", "display_name": "Hats" }]));
+        assert_eq!(cats[0].name, "Hats");
+    }
+
+    #[test]
+    fn reads_owned_items_in_any_wrapping() {
+        let list = json!({ "items": [
+            { "item_id": 1996, "variant_index": 0, "name": "???", "asset_type": "accessory", "slot": "hat", "thumbnail_url": "https://assets.luduvo.com/items/1996/th.png" },
+            { "item": { "id": 17, "name": "Body", "asset_type": "bundle" }, "variant_index": 2 },
+            { "item_id": 1996, "variant_index": 0 }
+        ]});
+        let items = owned_list(&list);
+        assert_eq!(items.iter().map(|i| (i.id, i.variant)).collect::<Vec<_>>(), vec![(1996, 0), (17, 2)]);
+        assert_eq!((items[1].name.as_str(), items[1].asset_type.as_str()), ("Body", "bundle"));
+        // The profile's `equipped_items`, as the real answer has them.
+        let worn = owned_list(&json!({ "user_id": 1, "equipped_items": [
+            { "item_id": 486, "name": "Spark Cap", "asset_type": "accessory", "thumbnail_url": "https://assets.luduvo.com/item_previews/486/a.png", "slots": ["hat"], "variant_index": 0 },
+            { "item_id": 17, "name": "Luduvo Default Bundle", "asset_type": "avatar_bundle", "slots": ["head", "torso"], "variant_index": 0 }
+        ]}));
+        assert_eq!((worn[0].id, worn[0].slot.as_str(), worn[1].asset_type.as_str()), (486, "hat", "avatar_bundle"));
+        assert!(worn[0].picture_url.is_some());
+        // An inventory entry, as the real answer has it: its own `id`, the item's `item_id` and `item_name`.
+        let inv = owned_list(&json!({ "hidden": false, "items": [{ "id": 9001, "item_id": 486, "item_name": "Spark Cap", "asset_type": "accessory", "variant_index": 0 }] }));
+        assert_eq!((inv[0].id, inv[0].name.as_str()), (486, "Spark Cap"));
+        let o = outfits(&json!({ "outfits": [{ "id": 3, "name": "Winter", "headshot_key": "headshots/1/ab.png", "headshot_has_variants": false }] }));
+        assert_eq!((o[0].id, o[0].name.as_str(), o[0].picture_url.as_deref()), (3, "Winter", Some("https://assets.luduvo.com/headshots/1/ab.png")));
+        let o = outfits(&json!({ "outfits": [
+            { "id": 4, "name": "Sized", "headshot_key": "outfits/1/cd.png", "headshot_has_variants": true },
+            { "id": 5, "name": "None yet", "headshot_key": null }
+        ] }));
+        assert_eq!(o[0].picture_url.as_deref(), Some("https://assets.luduvo.com/outfits/1/cd/240.png"));
+        assert_eq!(o[1].picture_url, None);
+    }
+
+    #[test]
+    fn reads_a_profile_and_presence() {
+        let p = profile(&json!({ "user_id": 1, "username": "luduvo", "display_name": "Luduvo", "bio": "hi", "status": "", "tier": "free",
+            "member_since": 1766534400, "friend_count": 2, "place_count": 1, "friends_hidden": false,
+            "badges": [{ "name": "Administrator" }],
+            "equipped_items": [{ "item_id": 486, "name": "Spark Cap", "asset_type": "accessory", "slots": ["hat"], "variant_index": 0 }] })).unwrap();
+        assert_eq!((p.id, p.display_name.as_str(), p.friends, p.badges.clone(), p.wearing.len()), (1, "Luduvo", Some(2), vec!["Administrator".to_string()], 1));
+        let pr = single_presence(&json!({ "online": true, "state": "in_game", "joinable": true, "place": { "id": 30, "title": "snow battle" } }));
+        assert_eq!((pr.state.as_str(), pr.place_id, pr.joinable), ("in_game", Some(30), true));
+        assert_eq!(single_presence(&json!({ "online": true })).state, "online");
+        let g = groups(&json!({ "groups": [{ "group": { "id": 9, "name": "Builders", "member_count": 40 }, "role": { "name": "Owner" } }] }));
+        assert_eq!((g[0].id, g[0].name.as_str(), g[0].members, g[0].role.as_str()), (9, "Builders", 40, "Owner"));
+    }
+
+    #[test]
+    fn follows_the_launcher_log() {
+        // Real lines from a first start.
+        let log = "2026-11-16T13:47:55.861Z I 421989 | update available: seq 0 -> 2000054000, version <none> -> 54\n\
+                   2026-11-16T13:47:58.214Z I 421989 | update applied: version=54 seq=2000054000\n\
+                   2026-11-16T13:48:03.185Z I 422142 | launcher content: warmed 50 of 1922 objects\n\
+                   2026-11-16T13:49:00.645Z W 422139 | launcher content: download failed for shaders/d3d12/x.json\n\
+                   2026-11-16T13:49:41.952Z I 422144 | launcher content: warmed 850 of 1922 objects\n";
+        let start = log_time_ms("2026-11-16T13:47:55.000Z").unwrap();
+        assert_eq!(launch_step(log, start), Some(LaunchStep { stage: "content", done: Some(850), total: Some(1922) }));
+        assert_eq!(launch_step(&log[..log.find("2026-11-16T13:48").unwrap()], start).unwrap().stage, "checking");
+        let ready = "2026-11-16T18:58:55.645Z I 821788 | launcher content: version 14 ready, 1922 names in /x\n";
+        assert_eq!(launch_step(ready, log_time_ms("2026-11-16T18:58:50.000Z").unwrap()).unwrap().stage, "starting");
+        // Lines from an earlier start don't count.
+        assert_eq!(launch_step(log, start + 10 * 60_000), None);
+        assert_eq!(log_time_ms("1970-01-01T00:00:01.500Z"), Some(1500));
+    }
+
+    #[test]
     fn reads_balance() {
         assert_eq!(balance(&json!({ "balance": 40 })), Some(40));
         assert_eq!(balance(&json!(12)), Some(12));
@@ -455,6 +923,30 @@ mod tests {
         let u = user(&json!({ "id": 12, "username": "puppy", "display_name": null, "balance": 40 })).unwrap();
         assert_eq!((u.id, u.name.as_str(), u.display_name.as_str(), u.balance), (12, "puppy", "puppy", Some(40)));
         assert!(user(&json!({ "username": "x" })).is_none());
+    }
+
+    #[test]
+    fn bundles_and_clothes_know_their_slots() {
+        let l = owned_list(&json!({ "items": [
+            { "item_id": 1, "item_name": "Robot", "asset_type": "avatar_bundle" },
+            { "item_id": 2, "item_name": "Tee", "asset_type": "flat_shirt" },
+            { "item_id": 3, "item_name": "Cap", "asset_type": "accessory", "slot": "hat" },
+            { "item_id": 4, "name": "Legs", "asset_type": "avatar_bundle", "slots": ["left_leg", "right_leg"] }
+        ] }));
+        assert_eq!(l[0].slots.len(), 6);
+        assert_eq!(l[1].slots, vec!["shirt"]);
+        assert_eq!(l[2].slots, vec!["hat"]);
+        assert_eq!(l[3].slots, vec!["left_leg", "right_leg"]);
+    }
+
+    #[test]
+    fn reads_colour_variants() {
+        let l = variants(&json!({ "variants": [
+            { "variant_index": 1, "name": "White", "hex_code": "#EDEDED", "thumbnail_key": "item_previews/1738/v1/ab.png" },
+            { "variant_index": 2, "name": "Odd", "hex_code": "red; x", "thumbnail_key": "../x.png" }
+        ] }));
+        assert_eq!(l[0], Variant { index: 1, name: "White".into(), color: Some("#EDEDED".into()), picture_url: Some("https://assets.luduvo.com/item_previews/1738/v1/ab.png".into()) });
+        assert_eq!((l[1].color.as_deref(), l[1].picture_url.as_deref()), (None, None));
     }
 
     #[test]

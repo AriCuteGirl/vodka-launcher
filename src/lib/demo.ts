@@ -1,6 +1,6 @@
 // Browser-only stand-in for the Rust backend, used with `pnpm dev` to design and
 // screenshot every state without Tauri. Pick a scenario with ?demo=<name>.
-import { NO_OPTIONS, type LuduvoFriend, type LuduvoPlace, type LuduvoRunning, type LuduvoUser, type Account, type AppError, type ChatContact, type ChatMessage, type GameStanding, type Item, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, type LuduvoFriend, type LuduvoItem, type LuduvoOwned, type LuduvoPlace, type LuduvoRunning, type LuduvoUser, type Account, type AppError, type ChatContact, type ChatMessage, type GameStanding, type Item, type Party, type PartyEvent, type Person, type ExitEvent, type Game, type Instance, type LaunchOptions, type MocktailStatus, type Settings, type User } from "./types";
 
 export const DEMO_GAMES: Game[] = [
   { universeId: 6035872082, placeId: 17625359962, name: "RIVALS", playing: 149534, iconUrl: "https://tr.rbxcdn.com/180DAY-1912e777e949b6490e59fa4ac83b1063/256/256/Image/Png/noFilter" },
@@ -43,10 +43,28 @@ const luduvoFriend = (id: number, displayName: string, state: string, placeTitle
 let luduvoFriends: LuduvoFriend[] = [luduvoFriend(3, "Nikhil", "in_game", "Stamper Build"), luduvoFriend(4, "poptart", "online"), luduvoFriend(5, "alt9999990929", "offline")];
 let luduvoRequests: LuduvoFriend[] = [luduvoFriend(6, "snowmelt", "offline")];
 let luduvoCoins = 40;
+const demoItem = (id: number, name: string, price: number | null, slot: string, assetType = "accessory"): LuduvoItem => ({
+  id, name, description: "", creator: "Luduvo", price, limited: false, assetType, slot, pictureUrl: null,
+  sales: id * 7, likes: id, dislikes: 2, owners: null, myVote: 0, expiresAt: null,
+});
+const owned = (id: number, name: string, assetType: string, slot: string): LuduvoOwned => ({
+  id, variant: 0, name, assetType, slot, pictureUrl: null, variantName: null, variantColor: null,
+  slots: assetType === "avatar_bundle" ? ["head", "torso", "left_arm", "right_arm", "left_leg", "right_leg"] : [slot],
+});
+const luduvoOwned: LuduvoOwned[] = [
+  owned(1, "Winter Beanie", "accessory", "hat"), owned(2, "Flag", "accessory", "hat"), owned(3, "Big Grin", "accessory", "face"),
+  owned(4, "Puffer Jacket", "flat_shirt", "shirt"), owned(5, "Cargo Pants", "flat_pant", "pants"), owned(17, "Classic Body", "avatar_bundle", "head"),
+  owned(18, "Robot Body", "avatar_bundle", "head"),
+];
+let luduvoWearing: LuduvoOwned[] = [luduvoOwned[0], luduvoOwned[2], luduvoOwned[5]];
+let luduvoOutfits = [{ id: 40, name: "Winter", pictureUrl: null as string | null }];
+const DEMO_ITEMS: LuduvoItem[] = [
+  demoItem(1, "Winter Beanie", 25, "hat"), demoItem(2, "Flag", 0, "hat"), demoItem(3, "Big Grin", 10, "face"),
+  demoItem(4, "Puffer Jacket", 60, "", "shirt"), demoItem(5, "Cargo Pants", 35, "", "pants"), demoItem(6, "Crown of Frost", null, "hat"),
+];
 let demoGroup = { id: 4372130, name: "Gamer Robot Inc", members: 19707257, verified: true, publicEntry: true, myRole: null as string | null };
 let demoVipServers = [{ id: 77, name: "Farm room", active: true, expires: "2026-12-14T00:00:00Z", willRenew: true, price: 100, friendsAllowed: false }];
 let luduvoVote = { likes: 4, dislikes: 0, vote: 0 };
-let luduvoClaimed = false;
 let luduvoUser: LuduvoUser | null = scenario() === "signedout" ? null : { id: 9001, name: "puppygirl", displayName: "Puppy Girl", balance: 40 };
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const signedOut = ["onboarding", "signedout"].includes(scenario());
@@ -548,11 +566,37 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_play": {
       await wait(700);
       const place = DEMO_LUDUVO.find((p) => p.id === args.placeId);
-      luduvoRunning = { placeId: args.placeId as number, title: place?.title ?? "Game", pid: 4242, startedAt: Math.floor(Date.now() / 1000) };
+      luduvoRunning = { placeId: args.placeId as number, title: place?.title ?? "Game", pid: 4242, startedAt: Math.floor(Date.now() / 1000), stage: "content", done: 850, total: 1922 };
       return luduvoRunning;
     }
     case "open_private_server_page":
       return null;
+    case "user_profile": {
+      await wait(250);
+      const f = demoFriends.find((x) => x.id === args.userId);
+      const name = f?.displayName ?? "Frostbyte";
+      return {
+        id: args.userId, name: name.toLowerCase().replace(/\s+/g, ""), displayName: name,
+        description: "building things and losing at RIVALS 💙\nadd me if you want to play!",
+        created: "2019-06-02T12:00:00Z", verified: false, banned: false, avatarUrl: null,
+        friends: 137, followers: 52, following: 18, presence: f?.presence ?? { kind: "online", location: "Website" },
+      };
+    }
+    case "user_friends":
+      await wait(300);
+      return demoFriends.filter((x) => x.id !== args.userId);
+    case "user_favorites":
+      await wait(300);
+      return games(DEMO_GAMES.slice(2, 7));
+    case "user_games":
+      await wait(300);
+      return games(DEMO_GAMES.slice(8, 10));
+    case "user_groups":
+      await wait(300);
+      return [
+        { id: 4372130, name: "Gamer Robot Inc", members: 19707257, verified: true, role: "Fan", iconUrl: null },
+        { id: 7, name: "Frost Builders", members: 312, verified: false, role: "Owner", iconUrl: null },
+      ];
     case "roblox_group":
       await wait(200);
       return demoGroup;
@@ -624,7 +668,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_play_private":
       await wait(600);
       if (String(args.code).trim().length < 4) throw { kind: "other", message: "That doesn't look like a Luduvo private server code." };
-      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4245, startedAt: Math.floor(Date.now() / 1000) };
+      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4245, startedAt: Math.floor(Date.now() / 1000), stage: "playing", done: null, total: null };
       return luduvoRunning;
     case "luduvo_join_group":
       await wait(300);
@@ -639,8 +683,82 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       ];
     case "luduvo_play_server":
       await wait(700);
-      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4244, startedAt: Math.floor(Date.now() / 1000) };
+      luduvoRunning = { placeId: args.placeId as number, title: String(args.title), pid: 4244, startedAt: Math.floor(Date.now() / 1000), stage: "playing", done: null, total: null };
       return luduvoRunning;
+    case "luduvo_store_categories":
+      return [
+        { assetType: "accessory", slot: "hat", name: "Hats" },
+        { assetType: "accessory", slot: "face", name: "Faces" },
+        { assetType: "shirt", slot: "", name: "Shirts" },
+        { assetType: "pants", slot: "", name: "Pants" },
+      ];
+    case "luduvo_store": {
+      await wait(300);
+      const q = String(args.query ?? "").toLowerCase();
+      const items = DEMO_ITEMS.filter((i) => (!q || i.name.toLowerCase().includes(q)) && (!args.slot || i.slot === args.slot) && (!args.assetType || i.assetType === args.assetType));
+      return { items, total: items.length };
+    }
+    case "luduvo_store_item":
+      await wait(200);
+      return { ...(DEMO_ITEMS.find((i) => i.id === args.itemId) ?? DEMO_ITEMS[0]), owners: 370, description: "A cozy little hat for chilly servers." };
+    case "luduvo_rate_item":
+      return { ...(DEMO_ITEMS.find((i) => i.id === args.itemId) ?? DEMO_ITEMS[0]), myVote: Number(args.value) };
+    case "luduvo_favorite_item":
+      return null;
+    case "luduvo_buy_item": {
+      await wait(500);
+      const price = Number(args.agreedPrice);
+      if (price > luduvoCoins) throw { kind: "other", message: "Luduvo: You don't have enough Lunes." };
+      luduvoCoins -= price;
+      return luduvoCoins;
+    }
+    case "luduvo_profile": {
+      await wait(250);
+      const f = luduvoFriends.find((x) => x.id === args.userId) ?? luduvoFriends[0];
+      return {
+        id: args.userId, name: f.name, displayName: f.displayName, bio: "fishing all day 🎣\nadd me!", status: "", tier: "free",
+        memberSince: 1782496622, lastActive: Math.floor(Date.now() / 1000) - 600, friends: 12, places: 2, items: 7, friendsHidden: false,
+        badges: ["Early Tester"], wearing: luduvoOwned.slice(0, 2), headshotUrl: null, pictureUrl: null,
+        state: f.state, placeId: f.placeId, placeTitle: f.placeTitle, joinable: f.joinable,
+      };
+    }
+    case "luduvo_user_friends":
+      await wait(250);
+      return luduvoFriends.filter((x) => x.id !== args.userId);
+    case "luduvo_user_places":
+      await wait(250);
+      return DEMO_LUDUVO.slice(0, 2);
+    case "luduvo_user_groups":
+      await wait(250);
+      return [{ id: 9, name: "Snow Builders", members: 40, role: "Member", iconUrl: null }];
+    case "luduvo_avatar":
+      await wait(250);
+      return { pictureUrl: null, wearing: luduvoWearing };
+    case "luduvo_set_wearing":
+      await wait(400);
+      luduvoWearing = (args.items as { id: number }[]).map(({ id }) => luduvoOwned.find((o) => o.id === id)).filter((o): o is LuduvoOwned => !!o);
+      return { pictureUrl: null, wearing: luduvoWearing };
+    case "luduvo_inventory":
+      await wait(250);
+      return luduvoOwned.filter((o) => (!args.assetType || o.assetType === args.assetType) && (!args.slot || o.slot === args.slot));
+    case "luduvo_outfits":
+      return luduvoOutfits;
+    case "luduvo_wear_outfit":
+      await wait(400);
+      return { pictureUrl: null, wearing: luduvoWearing };
+    case "luduvo_save_outfit":
+      luduvoOutfits = [...luduvoOutfits, { id: 50 + luduvoOutfits.length, name: String(args.name), pictureUrl: null }];
+      return luduvoOutfits;
+    case "luduvo_delete_outfit":
+      luduvoOutfits = luduvoOutfits.filter((o) => o.id !== args.outfitId);
+      return luduvoOutfits;
+    case "luduvo_add_friend":
+      await wait(300);
+      if (!/^[a-z0-9_.]+$/i.test(String(args.username).replace(/^@/, ""))) throw { kind: "other", message: "That doesn't look like a Luduvo username." };
+      return null;
+    case "luduvo_remove_friend":
+      luduvoFriends = luduvoFriends.filter((f) => f.id !== args.userId);
+      return null;
     case "luduvo_friends":
       await wait(300);
       return luduvoFriends;
@@ -654,16 +772,10 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     }
     case "luduvo_join_friend":
       await wait(700);
-      luduvoRunning = { placeId: (args.placeId as number) ?? 0, title: String(args.title), pid: 4243, startedAt: Math.floor(Date.now() / 1000) };
+      luduvoRunning = { placeId: (args.placeId as number) ?? 0, title: String(args.title), pid: 4243, startedAt: Math.floor(Date.now() / 1000), stage: "playing", done: null, total: null };
       return luduvoRunning;
     case "luduvo_balance":
       return luduvoCoins;
-    case "luduvo_claim_daily":
-      await wait(400);
-      if (luduvoClaimed) throw { kind: "other", message: "Luduvo: You already claimed today's reward." };
-      luduvoClaimed = true;
-      luduvoCoins += 10;
-      return { amount: 10, balance: luduvoCoins };
     case "luduvo_running":
       return luduvoRunning;
     case "luduvo_stop":

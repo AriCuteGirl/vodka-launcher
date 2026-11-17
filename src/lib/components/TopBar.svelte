@@ -2,7 +2,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { gameOf } from "$lib/games";
-  import { claimDaily, luduvo, luduvoSignIn, luduvoSignOut, openStudio } from "$lib/luduvo.svelte";
+  import { buyLunes, luduvo, luduvoSignIn, luduvoSignOut, openStudio } from "$lib/luduvo.svelte";
   import { app, removeAccount, signIn, switchAccount } from "$lib/state.svelte";
   import Avatar from "./Avatar.svelte";
   import Button from "./Button.svelte";
@@ -22,6 +22,7 @@
     gallery: "Design system",
     chat: "Chat",
     avatar: "Avatar",
+    users: "Profile",
   };
   const game = $derived(gameOf(page.url.pathname));
   const crumb = $derived.by(() => {
@@ -70,8 +71,8 @@
 
     {#if game.id === "luduvo"}
       {#if luduvo.user && luduvo.coins != null}
-        <button class="robux coins" onclick={claimDaily} title="Your Luduvo coins. Click to claim today's daily reward." aria-label="{luduvo.coins.toLocaleString()} C$. Claim the daily reward">
-          <span class="cs">C$</span><span>{luduvo.coins.toLocaleString()}</span>
+        <button class="robux coins" onclick={buyLunes} title="Your Lunes. Click to buy more on luduvo.com." aria-label="{luduvo.coins.toLocaleString()} Lunes. Buy more on luduvo.com">
+          <span>{luduvo.coins.toLocaleString()}</span><span class="cs">Lunes</span>
         </button>
       {/if}
       <div class="account">
@@ -95,7 +96,8 @@
               <p>Luduvo account</p>
               <div class="solo"><Avatar name={user.displayName} src={null} size={22} /><span class="who">{user.displayName}<small>@{user.name}</small></span></div>
               <hr />
-              <button role="menuitem" onclick={claimDaily}><Icon name="star" size={16} /> Claim daily reward</button>
+              <a role="menuitem" href="/luduvo/users/{user.id}"><Icon name="avatar" size={16} /> Your profile</a>
+              <button role="menuitem" onclick={buyLunes}><Icon name="star" size={16} /> Buy Lunes</button>
               <button role="menuitem" onclick={openStudio}><Icon name="terminal" size={16} /> Open Luduvo Studio</button>
               <button role="menuitem" onclick={luduvoSignOut}><Icon name="signOut" size={16} /> Sign out of Luduvo</button>
             </div>
@@ -136,6 +138,7 @@
               </button>
             {/each}
             <hr />
+            <a role="menuitem" href="/users/{app.account.id}"><Icon name="avatar" size={16} /> Your profile</a>
             <button role="menuitem" onclick={signIn}><Icon name="plus" size={16} /> Add another account</button>
             <a role="menuitem" href="/players"><Icon name="players" size={16} /> Manage accounts</a>
             <button role="menuitem" onclick={() => app.account && removeAccount(app.account.id)}>

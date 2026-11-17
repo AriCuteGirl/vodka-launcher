@@ -1,5 +1,6 @@
 // Luduvo's part of Vodka: its own account, game lists and Play, separate from Roblox's state.
 import { api } from "./api";
+import { noteFriends } from "./alerts.svelte";
 import { toast } from "./state.svelte";
 import { toAppError, type Loadable, type LuduvoFriend, type LuduvoPlace, type LuduvoRunning, type LuduvoShelf, type LuduvoStatus, type LuduvoUser } from "./types";
 
@@ -43,6 +44,21 @@ export async function loadSocial() {
   try {
     const friends = await api.luduvoFriends();
     luduvo.friends = { status: "ready", data: friends };
+    if (luduvo.user) {
+      noteFriends(
+        "luduvo",
+        luduvo.user.id,
+        friends.map((f) => ({
+          id: f.id,
+          name: f.displayName,
+          avatarUrl: f.avatarUrl,
+          activity: f.state === "in_game" ? "playing" : f.state === "online" ? "online" : "offline",
+          game: f.state === "in_game" ? f.placeTitle : null,
+          join: f.state === "in_game" && f.joinable ? () => void joinLuduvoFriend(f) : null,
+          profile: `/luduvo/users/${f.id}`,
+        })),
+      );
+    }
   } catch (e) {
     // Keep showing the last list if a refresh fails.
     if (luduvo.friends.status !== "ready") luduvo.friends = { status: "error", error: toAppError(e) };
@@ -52,11 +68,7 @@ export async function loadSocial() {
   } catch {
     // The list just stays as it was.
   }
-  try {
-    luduvo.coins = await api.luduvoBalance();
-  } catch {
-    // The balance just stays as it was.
-  }
+  await loadBalance();
 }
 
 export function loadRecent() {
@@ -96,7 +108,17 @@ export async function startLuduvo() {
     toast(toAppError(e).message, "danger");
   }
   void loadRecent();
+  void loadBalance(true);
   void loadSocial();
+  // Lunes change when you buy on the website or get a subscription's daily Lunes: read them again when you come back
+  // to Vodka, and every half minute while it's in front.
+  window.addEventListener("focus", () => void loadBalance());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void loadBalance();
+  });
+  setInterval(() => {
+    if (document.visibilityState === "visible") void loadBalance();
+  }, 30_000);
   // Friends come and go: look again every minute, like the Roblox side.
   setInterval(() => {
     if (document.visibilityState === "visible") void loadSocial();
@@ -184,14 +206,21 @@ export async function answerLuduvoRequest(friend: LuduvoFriend, accept: boolean)
   }
 }
 
-export async function claimDaily() {
+/** Lunes can only be bought, on Luduvo's own store page. */
+export function buyLunes() {
+  void api.openExternal("https://luduvo.com/store").catch((e) => toast(toAppError(e).message, "danger"));
+}
+
+let balanceAt = 0;
+/** Reads your Lunes again. Skips it when it was read in the last few seconds, unless `force`. */
+export async function loadBalance(force = false) {
+  if (!luduvo.user || (!force && Date.now() - balanceAt < 5_000)) return;
+  balanceAt = Date.now();
   try {
-    const answer = await api.luduvoClaimDaily();
-    const amount = answer && typeof answer === "object" ? (answer.amount ?? answer.reward ?? answer.coins) : null;
-    toast(typeof amount === "number" ? `Daily reward claimed: ${amount} C$.` : "Daily reward claimed.", "ok");
-    luduvo.coins = await api.luduvoBalance().catch(() => luduvo.coins);
-  } catch (e) {
-    toast(toAppError(e).message, "danger");
+    const coins = await api.luduvoBalance();
+    if (coins != null) luduvo.coins = coins;
+  } catch {
+    // The balance just stays as it was.
   }
 }
 
@@ -237,6 +266,15 @@ export async function playLuduvoPrivate(place: LuduvoPlace, code: string): Promi
   } finally {
     setTimeout(() => (luduvo.starting = null), 4000);
   }
+}
+
+/** What a starting Luduvo game is doing, in words; null once it's running. */
+export function startingText(r: LuduvoRunning | null): string | null {
+  if (!r || r.stage === "playing") return null;
+  if (r.stage === "updating") return "Updating Luduvo…";
+  if (r.stage === "content") return r.done != null && r.total ? `Downloading game content · ${r.done} of ${r.total}` : "Downloading game content…";
+  if (r.stage === "starting") return "Starting the game…";
+  return "Checking for updates…";
 }
 
 export async function stopLuduvo() {

@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { api } from "$lib/api";
   import { applyPreset, parseFlagJson, PRESETS } from "$lib/presets";
-  import { app, rollbackClient, saveLaunchOptions, toast } from "$lib/state.svelte";
+  import { app, onWindows, rollbackClient, saveLaunchOptions, toast } from "$lib/state.svelte";
   import { NO_OPTIONS, toAppError, type LaunchOptions } from "$lib/types";
   import Button from "./Button.svelte";
   import Icon from "./Icon.svelte";
@@ -22,7 +22,9 @@
   let importError = $state<string | null>(null);
 
   const saved = (s: number | null): LaunchOptions => (s == null ? app.settings.defaults : (app.settings.accountOptions[String(s)] ?? NO_OPTIONS));
-  const inherit = $derived(scope == null ? "Mocktail's setting" : "Same as all accounts");
+  // On Windows the official client runs the game: only the options it can take are shown.
+  const win = $derived(onWindows());
+  const inherit = $derived(scope == null ? (win ? "Roblox's setting" : "Mocktail's setting") : "Same as all accounts");
   const account = $derived(app.accounts.find((a) => a.id === scope) ?? null);
   const flagRows = $derived(Object.entries(draft.fflags).sort(([a], [b]) => a.localeCompare(b)));
   const MEMORY_PRESETS = [4096, 6144, 8192, 12288, 16384];
@@ -134,7 +136,8 @@
   </div>
   <p class="faint">
     {#if scope == null}
-      Used for every account unless that account sets its own. Anything left on "{inherit}" stays under the control of Mocktail's config.yaml.
+      Used for every account unless that account sets its own. Anything left on "{inherit}" stays
+      {win ? "as Roblox has it. Vodka writes these into Roblox's ClientAppSettings.json just before each game starts." : "under the control of Mocktail's config.yaml."}
     {:else}
       Only for {account?.displayName}. Anything left on "{inherit}" follows the All accounts tab.
     {/if}
@@ -146,7 +149,7 @@
       <select value={fpsChoice} onchange={(e) => set("fps", e.currentTarget.value === "custom" ? "120" : text(e.currentTarget.value))}>
         <option value="">{inherit}</option>
         <option value="display">Match the display</option>
-        <option value="unlimited">Unlimited (up to 240)</option>
+        <option value="unlimited">{win ? "Unlimited" : "Unlimited (up to 240)"}</option>
         <option value="custom">Custom limit</option>
       </select>
     </label>
@@ -156,6 +159,7 @@
         <input type="number" min="1" max="1000" value={draft.fps} oninput={(e) => set("fps", e.currentTarget.value)} />
       </label>
     {/if}
+    {#if !win}
     <label>
       <span>Graphics backend</span>
       <select value={draft.backend ?? ""} onchange={(e) => set("backend", text(e.currentTarget.value))}>
@@ -166,6 +170,8 @@
         <option value="system">System default</option>
       </select>
     </label>
+    {/if}
+    {#if !win}
     <label>
       <span>VSync</span>
       <select value={draft.vsync ?? ""} onchange={(e) => set("vsync", text(e.currentTarget.value))}>
@@ -175,6 +181,8 @@
         <option value="off">Off</option>
       </select>
     </label>
+    {/if}
+    {#if !win}
     <label>
       <span>Present mode</span>
       <select value={draft.presentMode ?? ""} onchange={(e) => set("presentMode", text(e.currentTarget.value))}>
@@ -185,6 +193,8 @@
         <option value="immediate">Immediate (may tear)</option>
       </select>
     </label>
+    {/if}
+    {#if !win}
     <label>
       <span>Multithreaded rendering</span>
       <select
@@ -196,6 +206,8 @@
         <option value="off">Off</option>
       </select>
     </label>
+    {/if}
+    {#if !win}
     <label>
       <span>Feral GameMode</span>
       <select value={draft.gamemode ?? ""} onchange={(e) => set("gamemode", text(e.currentTarget.value))}>
@@ -205,6 +217,20 @@
         <option value="off">Never</option>
       </select>
     </label>
+    {/if}
+    {#if win}
+      <label>
+        <span>Graphics API</span>
+        <select value={draft.renderer ?? ""} onchange={(e) => set("renderer", text(e.currentTarget.value))}>
+          <option value="">{inherit}</option>
+          <option value="auto">Let Roblox choose</option>
+          <option value="d3d11">Direct3D 11</option>
+          <option value="vulkan">Vulkan</option>
+          <option value="opengl">OpenGL</option>
+        </select>
+        <small>Sets Roblox's renderer flag. Roblox falls back to its own choice if your graphics card can't use it.</small>
+      </label>
+    {/if}
     <label>
       <span>Memory safety limit</span>
       <select value={memoryChoice} onchange={(e) => set("memoryLimitMb", e.currentTarget.value === "" ? null : Number(e.currentTarget.value))}>
@@ -214,8 +240,9 @@
           <option value={String(mb)}>{mb / 1024} GB</option>
         {/each}
       </select>
-      <small>Doesn't make Roblox use less. Mocktail closes the game if it goes over, so leave room for spikes.</small>
+      <small>Doesn't make Roblox use less. {win ? "Vodka" : "Mocktail"} closes the game if it goes over, so leave room for spikes.</small>
     </label>
+    {#if !win}
     <label>
       <span>If the game crashes or disconnects</span>
       <select value={draft.autoRejoin == null ? "" : draft.autoRejoin ? "on" : "off"} onchange={(e) => set("autoRejoin", tri(e.currentTarget.value))}>
@@ -225,6 +252,8 @@
       </select>
       <small>Starts the same game again, up to 5 times in 15 minutes. Closing a game yourself never triggers it.</small>
     </label>
+    {/if}
+    {#if !win}
     <label>
       <span>Roblox client updates</span>
       <select value={draft.holdUpdates == null ? "" : draft.holdUpdates ? "on" : "off"} onchange={(e) => set("holdUpdates", tri(e.currentTarget.value))}>
@@ -233,9 +262,10 @@
         <option value="on">Hold the current version</option>
       </select>
     </label>
+    {/if}
   </div>
 
-  {#if account}
+  {#if account && !win}
     <div class="client">
       <span class="muted">
         {account.clientVersion ? `This account's profile runs Roblox ${account.clientVersion}.` : "This account hasn't played here yet."}

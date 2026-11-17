@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { luduvo, luduvoSignIn, openStudio, playLuduvo, stopLuduvo } from "$lib/luduvo.svelte";
+  import { luduvo, luduvoSignIn, openStudio, playLuduvo, startingText, stopLuduvo } from "$lib/luduvo.svelte";
   import Button from "./Button.svelte";
   import GameLogo from "./GameLogo.svelte";
 
@@ -30,7 +30,17 @@
   <div class="copy">
     <p class="eyebrow"><GameLogo game="luduvo" size={14} />{greeting}{#if luduvo.user}, {luduvo.user.displayName}{/if}</p>
 
-    {#if playing}
+    {#if playing && startingText(playing)}
+      <h1>Getting <span>{playing.title}</span> ready</h1>
+      <div class="getting" role="status">
+        <span>{startingText(playing)}</span>
+        <span class="bar" class:busy={!(playing.stage === "content" && playing.total)}>
+          <i style:width={playing.stage === "content" && playing.total ? `${Math.min(100, ((playing.done ?? 0) / playing.total) * 100)}%` : undefined}></i>
+        </span>
+        <small class="faint">Luduvo gets itself ready before the game opens. The first start, or one after an update, takes a few minutes.</small>
+      </div>
+      <div class="cta"><Button icon="close" onclick={stopLuduvo}>Cancel</Button></div>
+    {:else if playing}
       <h1>You're in <span>{playing.title}</span></h1>
       <div class="cta">
         <span class="live"><i></i>Playing since {since(playing.startedAt)}</span>
@@ -148,6 +158,46 @@
     border-radius: 50%;
     background: var(--ok);
     box-shadow: 0 0 10px var(--ok);
+  }
+  .getting {
+    display: grid;
+    gap: 6px;
+    max-width: 420px;
+    font-size: var(--fs-sm);
+  }
+  .bar {
+    position: relative;
+    height: 8px;
+    border-radius: var(--r-full);
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--frost-strong);
+    transition: width var(--slow) var(--ease);
+  }
+  /* No numbers yet: a band that slides, so it's clear something is happening. */
+  .bar.busy i {
+    width: 35%;
+    animation: slide 1.4s ease-in-out infinite;
+  }
+  @keyframes slide {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bar.busy i {
+      animation: none;
+      width: 100%;
+      opacity: 0.5;
+    }
   }
   .side {
     position: absolute;

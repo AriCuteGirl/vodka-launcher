@@ -95,7 +95,7 @@
           }}
           onopen={(g) => goto(`/luduvo/games/${g.placeId}`)}
           disabled={!canPlay}
-          phase={luduvo.starting === place.id ? "starting" : luduvo.playing?.placeId === place.id ? "playing" : "idle"}
+          phase={luduvo.starting === place.id ? "starting" : luduvo.playing?.placeId === place.id ? (luduvo.playing.stage === "playing" ? "playing" : "starting") : "idle"}
         />
       {/each}
     </div>

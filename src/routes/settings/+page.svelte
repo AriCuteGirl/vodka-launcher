@@ -4,6 +4,7 @@
   import Logo from "$lib/components/Logo.svelte";
   import TweaksEditor from "$lib/components/TweaksEditor.svelte";
   import { app, askMultiInstance, onWindows, removeAccount, setFlags, signIn } from "$lib/state.svelte";
+  import { alerts, savePrefs } from "$lib/alerts.svelte";
   import { version } from "../../../package.json";
 </script>
 
@@ -30,19 +31,29 @@
     {/if}
   </section>
 
-  {#if app.mocktail?.engine !== "roblox"}
-    <section class="glass">
-      <h2>Performance</h2>
-      <TweaksEditor />
-    </section>
-  {/if}
+  <section class="glass">
+    <h2>Notifications</h2>
+    <label class="row toggle">
+      <input type="checkbox" bind:checked={alerts.prefs.online} onchange={savePrefs} />
+      <span class="grow"><b>When a friend comes online</b><span class="faint">A small pop-up at the top right, for Roblox and Luduvo friends.</span></span>
+    </label>
+    <label class="row toggle">
+      <input type="checkbox" bind:checked={alerts.prefs.playing} onchange={savePrefs} />
+      <span class="grow"><b>When a friend starts a game</b><span class="faint">With a Join button when their server can be joined.</span></span>
+    </label>
+  </section>
+
+  <section class="glass">
+    <h2>Performance</h2>
+    <TweaksEditor />
+  </section>
 
   {#if app.mocktail?.engine === "roblox"}
     <section class="glass">
       <h2>Launching</h2>
       <p class="muted">
-        On Windows, Vodka starts the official Roblox client signed in as the account you pick, using a one-time ticket from Roblox. Frame-rate
-        options, per-game stats, Restart and Gather are Linux features for now.
+        On Windows, Vodka starts the official Roblox client signed in as the account you pick, using a one-time ticket from Roblox. Restart, Gather
+        and per-game CPU and FPS are Linux features for now.
       </p>
       <div class="row">
         <div class="grow">
@@ -129,6 +140,17 @@
     display: flex;
     align-items: center;
     gap: var(--s-4);
+  }
+  .toggle {
+    cursor: pointer;
+  }
+  .toggle input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--frost-strong);
+  }
+  .toggle .grow {
+    display: grid;
   }
   .grow {
     flex: 1;

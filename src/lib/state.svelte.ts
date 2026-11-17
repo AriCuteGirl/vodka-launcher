@@ -1,5 +1,6 @@
 // App-wide reactive state. Components read `app.*` and call the functions below.
 import { api } from "./api";
+import { noteFriends } from "./alerts.svelte";
 import { NO_OPTIONS, toAppError, type LaunchOptions, type Person, type Target, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type Settings, type User } from "./types";
 
 export interface Toast {
@@ -214,6 +215,19 @@ export async function refreshFriends(quiet = false) {
     if (app.account?.id !== forAccount) return;
     app.friends = { status: "ready", data: friends };
     app.friendRequests = requests;
+    noteFriends(
+      "roblox",
+      forAccount,
+      friends.map((f) => ({
+        id: f.id,
+        name: f.displayName,
+        avatarUrl: f.avatarUrl,
+        activity: f.presence.kind === "in_game" ? "playing" : f.presence.kind === "offline" ? "offline" : "online",
+        game: f.presence.kind === "in_game" ? f.presence.location : null,
+        join: f.presence.gameId ? () => void joinFriend(f) : null,
+        profile: `/users/${f.id}`,
+      })),
+    );
   } catch (e) {
     // A failed background refresh shouldn't replace a list that is already showing.
     if (app.account?.id === forAccount && !(quiet && app.friends.status === "ready")) app.friends = { status: "error", error: toAppError(e) };
