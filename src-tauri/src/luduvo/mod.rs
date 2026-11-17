@@ -227,6 +227,11 @@ fn explain(status: StatusCode, body: &str) -> AppError {
     let known = match code {
         "join_flood" => Some("You're joining games too quickly. Wait a few minutes and try again."),
         "paid_access_required" => Some("This game needs paid access. Buy it on luduvo.com first."),
+        // Luduvo's own wording for these, from its website.
+        "untrusted_account" => Some(
+            "Luduvo only allows this for accounts that are at least 24 hours old and have a verified email. Verify your email on luduvo.com (Settings), then try again.",
+        ),
+        "abuse_cooldown" => Some("Luduvo has temporarily blocked this account, device or network for suspicious activity. Try again later."),
         _ => None,
     };
     if let Some(text) = known {
@@ -1115,6 +1120,8 @@ mod tests {
         assert!(e.to_string().contains("too quickly"));
         let e = explain(StatusCode::BAD_REQUEST, "<html>nope</html>");
         assert!(e.to_string().contains("HTTP 400"));
+        let e = explain(StatusCode::FORBIDDEN, r#"{"error":"untrusted_account"}"#);
+        assert!(e.to_string().contains("verified email"));
         let e = explain(StatusCode::FORBIDDEN, r#"{"error":"gift_not_allowed"}"#);
         assert_eq!(e.to_string(), "Luduvo: Gift not allowed (HTTP 403).");
         let e = explain(StatusCode::FORBIDDEN, r#"{"error":"You can only gift friends."}"#);
