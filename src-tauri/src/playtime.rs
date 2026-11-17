@@ -98,6 +98,23 @@ pub fn note(all: &mut BTreeMap<String, Record>, game: &str, id: u64, title: &str
     r.sessions.retain(|(s, len)| s + len + KEEP_SECS > now);
 }
 
+/// Takes a total the game itself keeps (Luduvo counts your time too, including before Vodka). The game's count
+/// already includes sessions Vodka saw, so the larger of the two wins instead of adding them up.
+pub fn raise(all: &mut BTreeMap<String, Record>, game: &str, id: u64, title: &str, icon_url: Option<&str>, total_secs: u64, last_played: Option<u64>) {
+    if id == 0 || total_secs == 0 {
+        return;
+    }
+    let r = all.entry(key(game, id)).or_insert_with(|| Record { game: game.to_owned(), id, ..Default::default() });
+    if r.title.is_empty() || !title.is_empty() {
+        r.title = title.to_owned();
+    }
+    if r.icon_url.is_none() {
+        r.icon_url = icon_url.map(str::to_owned);
+    }
+    r.total_secs = r.total_secs.max(total_secs);
+    r.last_played = r.last_played.max(last_played.unwrap_or_default());
+}
+
 pub fn summary(all: &BTreeMap<String, Record>, now: u64) -> Vec<Played> {
     let mut list: Vec<Played> = all
         .values()
@@ -131,6 +148,19 @@ impl Store {
         let mut all = read(dir);
         note(&mut all, game, id, title, icon_url, start, now);
         write(dir, &all);
+    }
+
+    /// Takes several games' own totals at once (one write).
+    pub fn raise_all(&self, dir: &Path, game: &str, totals: &[(u64, &str, Option<&str>, u64, Option<u64>)]) {
+        let _g = self.lock.lock().unwrap();
+        let mut all = read(dir);
+        let before = all.clone();
+        for &(id, title, icon, secs, last) in totals {
+            raise(&mut all, game, id, title, icon, secs, last);
+        }
+        if all != before {
+            write(dir, &all);
+        }
     }
 
     pub fn list(&self, dir: &Path, now: u64) -> Vec<Played> {
@@ -172,6 +202,22 @@ mod tests {
         // Far later, the old sessions are gone but the total stays.
         note(&mut all, "luduvo", 9, "Fish.io", None, now + 60 * day, now + 60 * day + 60);
         assert_eq!((all["luduvo:9"].total_secs, all["luduvo:9"].sessions.len()), (960, 1));
+    }
+
+    #[test]
+    fn the_games_own_total_is_a_floor_not_an_addition() {
+        let mut all = BTreeMap::new();
+        raise(&mut all, "luduvo", 9, "Fish.io", Some("https://assets.luduvo.com/i.png"), 16_080, Some(500));
+        assert_eq!((all["luduvo:9"].total_secs, all["luduvo:9"].last_played), (16_080, 500));
+        // Vodka then sees a 10-minute session: it adds on top.
+        note(&mut all, "luduvo", 9, "Fish.io", None, 1000, 1600);
+        assert_eq!(all["luduvo:9"].total_secs, 16_680);
+        // Luduvo's count catches up with that session (and a bit): no double counting.
+        raise(&mut all, "luduvo", 9, "Fish.io", None, 16_700, Some(1600));
+        assert_eq!(all["luduvo:9"].total_secs, 16_700);
+        // An older, smaller count never lowers it.
+        raise(&mut all, "luduvo", 9, "Fish.io", None, 100, None);
+        assert_eq!((all["luduvo:9"].total_secs, all["luduvo:9"].last_played), (16_700, 1600));
     }
 
     #[test]

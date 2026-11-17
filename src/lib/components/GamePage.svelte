@@ -74,7 +74,7 @@
           <Icon name="clock" size={13} />
           <b>{hours(played.totalSecs)}</b> on record
           {#if played.twoWeeksSecs > 0}<span>· {hours(played.twoWeeksSecs)} past 2 weeks</span>{/if}
-          <span>· last played {lastPlayed(played.lastPlayed).toLowerCase()}</span>
+          {#if played.lastPlayed > 0}<span>· last played {lastPlayed(played.lastPlayed).toLowerCase()}</span>{/if}
         </p>
       {/if}
     </div>

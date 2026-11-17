@@ -1119,8 +1119,15 @@ async fn luduvo_search(state: State<'_, AppState>, query: String) -> Result<Vec<
 }
 
 #[tauri::command]
-async fn luduvo_recent(state: State<'_, AppState>) -> Result<Vec<luduvo::Place>> {
-    state.luduvo.recently_played().await
+async fn luduvo_recent(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<luduvo::Place>> {
+    let list = state.luduvo.recently_played().await?;
+    // Luduvo's own playtime counts from before Vodka, so it's where each game's total starts.
+    if let Ok(dir) = config_dir(&app) {
+        let totals: Vec<_> =
+            list.iter().filter_map(|p| Some((p.id, p.title.as_str(), p.icon_url.as_deref(), p.playtime?, p.last_played))).collect();
+        state.playtime.raise_all(&dir, "luduvo", &totals);
+    }
+    Ok(list)
 }
 
 /// Hands the launcher a join link and watches the game until it closes.

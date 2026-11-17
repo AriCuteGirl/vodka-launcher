@@ -23,6 +23,8 @@ pub struct Place {
     pub dislikes: u64,
     /// Your total time in this game, in seconds; only recently-played lists have it.
     pub playtime: Option<u64>,
+    /// Unix seconds you last played it; only recently-played lists have it.
+    pub last_played: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -84,6 +86,7 @@ pub fn place(v: &Value) -> Option<Place> {
         likes: num(v, "thumbs_up"),
         dislikes: num(v, "thumbs_down"),
         playtime: v.get("playtime_seconds").and_then(Value::as_u64),
+        last_played: v.get("last_played_at").and_then(Value::as_u64),
     })
 }
 
@@ -761,6 +764,7 @@ mod tests {
         let list = place_list(&recent);
         assert_eq!(list.len(), 1);
         assert_eq!((list[0].id, list[0].title.as_str(), list[0].playing, list[0].playtime), (1988, "Murder Mayhem", 3, Some(420)));
+        assert_eq!(list[0].last_played, Some(1794838800));
     }
 
     #[test]

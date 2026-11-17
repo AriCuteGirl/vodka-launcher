@@ -69,8 +69,10 @@
             </span>
             <span class="what">
               <span class="name">{p.title || `Game ${p.id}`}</span>
-              <span class="bar" aria-hidden="true"><i style:width="{(p.totalSecs / most) * 100}%"></i></span>
-              <span class="meta">Last played {lastPlayed(p.lastPlayed).toLowerCase()}{#if p.twoWeeksSecs > 0} · {hours(p.twoWeeksSecs)} past 2 weeks{/if}</span>
+              {#if mine.length > 1}
+                <span class="bar" title="Compared with your most-played game" aria-hidden="true"><i style:width="{(p.totalSecs / most) * 100}%"></i></span>
+              {/if}
+              <span class="meta">{[`Last played ${lastPlayed(p.lastPlayed).toLowerCase()}`, p.twoWeeksSecs > 0 && `${hours(p.twoWeeksSecs)} past 2 weeks`].filter(Boolean).join(" · ")}</span>
             </span>
             <span class="time"><b>{hours(p.totalSecs)}</b><small>on record</small></span>
             <Icon name="forward" size={16} />

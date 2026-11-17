@@ -1,6 +1,7 @@
 // Luduvo's part of Vodka: its own account, game lists and Play, separate from Roblox's state.
 import { api } from "./api";
 import { noteFriends } from "./alerts.svelte";
+import { loadPlaytime } from "./playtime.svelte";
 import { toast } from "./state.svelte";
 import { toAppError, type Loadable, type LuduvoFriend, type LuduvoPlace, type LuduvoRunning, type LuduvoShelf, type LuduvoStatus, type LuduvoUser } from "./types";
 
@@ -76,6 +77,8 @@ export function loadRecent() {
   luduvo.recent = { status: "loading" };
   return load((v) => {
     luduvo.recent = v;
+    // Reading the list also takes Luduvo's own playtime into Vodka's.
+    if (v.status === "ready") void loadPlaytime();
   }, api.luduvoRecent);
 }
 
