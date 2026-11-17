@@ -134,6 +134,9 @@ export const api = {
   luduvoRateItem: (itemId: number, value: number) => call<LuduvoItem>("luduvo_rate_item", { itemId, value }),
   luduvoFavoriteItem: (itemId: number, on: boolean) => call<void>("luduvo_favorite_item", { itemId, on }),
   /** Buys at exactly the confirmed price; resolves to the new balance. */
+  luduvoGiftItem: (itemId: number, toUser: number, agreedPrice: number) =>
+    call<number | null>("luduvo_gift_item", { itemId, toUser, agreedPrice }),
+  luduvoAnswerGift: (giftId: number, accept: boolean) => call<void>("luduvo_answer_gift", { giftId, accept }),
   luduvoBuyItem: (itemId: number, agreedPrice: number) => call<number | null>("luduvo_buy_item", { itemId, agreedPrice }),
   luduvoProfile: (userId: number) => call<LuduvoProfile>("luduvo_profile", { userId }),
   luduvoUserFriends: (userId: number) => call<LuduvoFriend[]>("luduvo_user_friends", { userId }),

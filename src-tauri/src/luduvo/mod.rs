@@ -531,6 +531,27 @@ impl Client {
         }
     }
 
+    /// Buys `id` for someone else at the price you agreed to; it arrives in your chat with them as a gift.
+    pub async fn gift_item(&self, id: u64, to_user: u64, agreed_price: u64) -> Result<()> {
+        let current = self.store_item(id).await?;
+        if current.price != Some(agreed_price) {
+            return Err(AppError::Other("The price changed since you looked. Check it and confirm again.".into()));
+        }
+        self.authed_with(
+            Method::POST,
+            &format!("/store/{id}/gift"),
+            Some(&serde_json::json!({ "expected_price": agreed_price, "to_user": to_user, "variant_index": 0 })),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Accepts or declines a gift someone sent you.
+    pub async fn answer_gift(&self, gift_id: u64, accept: bool) -> Result<()> {
+        self.authed(Method::POST, &format!("/gifts/{gift_id}/{}", if accept { "accept" } else { "reject" })).await?;
+        Ok(())
+    }
+
     /// A full-body picture of someone's avatar. Luduvo answers with a redirect to the picture on its asset host.
     pub async fn avatar_picture(&self, user_id: u64) -> Result<Option<String>> {
         let url = Url::parse(&format!("{API}/users/{user_id}/avatar/full-body")).expect("static url");

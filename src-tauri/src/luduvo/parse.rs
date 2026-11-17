@@ -785,6 +785,19 @@ pub struct ReplyTo {
     pub body: String,
 }
 
+/// A gift sent in a chat.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Gift {
+    pub id: u64,
+    pub item_id: u64,
+    pub item_name: String,
+    pub variant_name: String,
+    pub picture_url: Option<String>,
+    /// "pending", "accepted" or "rejected".
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
@@ -795,6 +808,7 @@ pub struct Message {
     /// Unix seconds.
     pub sent_at: u64,
     pub reply_to: Option<ReplyTo>,
+    pub gift: Option<Gift>,
     /// Set for messages Vodka can't show as text (a gift, an invite card): what the website calls it.
     pub kind: String,
 }
@@ -811,6 +825,21 @@ pub fn message(m: &Value) -> Option<Message> {
     let reply = reply.or_else(|| {
         m.get("reply_to_message_id").and_then(Value::as_u64).filter(|id| *id > 0).map(|id| ReplyTo { id, sender_id: None, sender_name: String::new(), body: String::new() })
     });
+    let gift = m.get("gift").filter(|g| g.is_object()).and_then(|g| {
+        let key = g.get("thumbnail_key").and_then(Value::as_str).map(|k| k.trim_start_matches('/')).filter(|k| {
+            !k.is_empty() && !k.contains("..") && k.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
+        });
+        Some(Gift {
+            id: g.get("gift_id").or_else(|| g.get("id")).and_then(Value::as_u64)?,
+            item_id: g.get("item_id").and_then(Value::as_u64).unwrap_or(0),
+            item_name: text(g, "item_name"),
+            variant_name: text(g, "variant_name"),
+            picture_url: key
+                .and_then(|k| asset_url(Some(&Value::String(format!("https://assets.luduvo.com/{k}")))))
+                .or_else(|| asset_url(g.get("thumbnail_url"))),
+            status: Some(text(g, "status")).filter(|s| !s.is_empty()).unwrap_or_else(|| "pending".into()),
+        })
+    });
     Some(Message {
         id: m.get("id")?.as_u64()?,
         sender_id: m.get("sender_id").and_then(Value::as_u64).unwrap_or(0),
@@ -818,6 +847,7 @@ pub fn message(m: &Value) -> Option<Message> {
         body: text(m, "body"),
         sent_at: m.get("sent_at").or_else(|| m.get("created_at")).and_then(unix_secs).unwrap_or(0),
         reply_to: reply,
+        gift,
         kind: if m.get("gift_id").is_some_and(|g| !g.is_null()) { "gift".into() } else { text(m, "kind") },
     })
 }
@@ -1102,10 +1132,15 @@ mod tests {
             { "id": 91, "sender_id": 5, "sender_username": "PuppyGirl", "body": "same", "sent_at": 1794870100,
               "reply_to": { "id": 90, "sender_id": 77, "sender_username": "Pixel_Pixe", "body": "hiiii" } },
             { "id": 90, "sender_id": 77, "sender_username": "Pixel_Pixe", "body": "hiiii", "sent_at": 1794870000 },
-            { "id": 89, "sender_id": 77, "sender_username": "Pixel_Pixe", "body": "", "sent_at": 1794860000, "gift_id": 3 }
+            { "id": 89, "sender_id": 77, "sender_username": "Pixel_Pixe", "body": "", "sent_at": 1794860000, "gift_id": 3,
+              "gift": { "gift_id": 3, "item_id": 1738, "item_name": "Long Emo Hair", "variant_name": "Pink", "status": "pending",
+                        "thumbnail_key": "item_previews/1738/v8/ab.png" } }
         ], "last_read_message_id": 90 }), 50);
         assert_eq!(p.messages.iter().map(|m| m.id).collect::<Vec<_>>(), vec![89, 90, 91]);
         assert_eq!((p.last_read_id, p.more, p.messages[0].kind.as_str()), (90, false, "gift"));
+        let g = p.messages[0].gift.as_ref().unwrap();
+        assert_eq!((g.id, g.item_name.as_str(), g.status.as_str()), (3, "Long Emo Hair", "pending"));
+        assert_eq!(g.picture_url.as_deref(), Some("https://assets.luduvo.com/item_previews/1738/v8/ab.png"));
         assert_eq!(p.messages[2].reply_to.as_ref().map(|r| (r.id, r.sender_name.as_str())), Some((90, "Pixel_Pixe")));
     }
 

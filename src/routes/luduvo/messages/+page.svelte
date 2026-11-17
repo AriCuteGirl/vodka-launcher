@@ -8,9 +8,9 @@
   import Modal from "$lib/components/Modal.svelte";
   import StateCard from "$lib/components/StateCard.svelte";
   import { headshot, loadChats, luduvoChat } from "$lib/luduvo-chat.svelte";
-  import { luduvo, luduvoSignIn, startLuduvo } from "$lib/luduvo.svelte";
+  import { buyLunes, loadBalance, luduvo, luduvoSignIn, startLuduvo } from "$lib/luduvo.svelte";
   import { toast } from "$lib/state.svelte";
-  import { toAppError, type LuduvoConversation, type LuduvoFriend, type LuduvoMessage } from "$lib/types";
+  import { toAppError, type LuduvoConversation, type LuduvoFriend, type LuduvoItem, type LuduvoMessage } from "$lib/types";
   import { onDestroy, onMount, tick } from "svelte";
 
   // Luduvo Messages, laid out like luduvo.com: your chats on the left, the open one on the right.
@@ -215,6 +215,78 @@
     input?.focus();
   }
 
+  // Gifts: pick a store item, confirm the price, and Luduvo sends it in this chat.
+  let gifting = $state(false);
+  let giftSearch = $state("");
+  let giftItems = $state<LuduvoItem[] | null>(null);
+  let giftError = $state<string | null>(null);
+  let giftPick = $state<LuduvoItem | null>(null);
+  let giftConfirm = $state(false);
+  let giftSending = $state(false);
+  let giftRun = 0;
+  const giftable = (i: LuduvoItem) => i.price != null && !i.limited;
+  async function findGifts() {
+    const run = ++giftRun;
+    giftError = null;
+    try {
+      const page = await api.luduvoStore(giftSearch.trim(), "", "", "relevance", 0);
+      if (run === giftRun) giftItems = page.items.filter(giftable);
+    } catch (e) {
+      if (run === giftRun) giftError = toAppError(e).message;
+    }
+  }
+  let giftTimer: ReturnType<typeof setTimeout> | undefined;
+  function giftSearchChanged() {
+    clearTimeout(giftTimer);
+    giftTimer = setTimeout(findGifts, 300);
+  }
+  function openGifts() {
+    gifting = true;
+    giftPick = null;
+    giftConfirm = false;
+    if (!giftItems) void findGifts();
+    void loadBalance(true);
+  }
+  function closeGifts() {
+    gifting = false;
+    giftConfirm = false;
+    giftPick = null;
+  }
+  const giftTo = $derived(open?.kind === "direct" ? open.peerId : null);
+  const tooDear = $derived(!!giftPick && giftPick.price != null && luduvo.coins != null && giftPick.price > luduvo.coins);
+  async function sendGift() {
+    if (!giftPick || giftPick.price == null || !giftTo || giftSending) return;
+    giftSending = true;
+    try {
+      const balance = await api.luduvoGiftItem(giftPick.id, giftTo, giftPick.price);
+      if (balance != null) luduvo.coins = balance;
+      toast(`Sent ${giftPick.name} to ${header?.name ?? "them"}.`, "ok");
+      closeGifts();
+      await poll();
+      void toBottom();
+      void loadChats();
+    } catch (e) {
+      toast(toAppError(e).message, "danger", 9000);
+    }
+    giftSending = false;
+  }
+
+  let answering = $state<number | null>(null);
+  async function answerGift(m: LuduvoMessage, accept: boolean) {
+    if (!m.gift || answering) return;
+    answering = m.gift.id;
+    try {
+      await api.luduvoAnswerGift(m.gift.id, accept);
+      const status = accept ? "accepted" : "rejected";
+      messages = messages.map((x) => (x.id === m.id && x.gift ? { ...x, gift: { ...x.gift, status } } : x));
+      toast(accept ? `${m.gift.itemName} is in your inventory.` : "Gift declined.", "ok");
+    } catch (e) {
+      toast(toAppError(e).message, "danger");
+    }
+    answering = null;
+  }
+  const lunes = (n: number) => (n === 0 ? "Free" : `${n.toLocaleString()} Lunes`);
+
   // Picking a friend for a new chat.
   let picking = $state(false);
   let pickSearch = $state("");
@@ -362,7 +434,26 @@
                     </span>
                   {/if}
                   <div class="line">
-                    <p class="bubble" class:note={!m.body}>{m.body || kindNote(m)}</p>
+                    {#if m.gift}
+                      {@const g = m.gift}
+                      <div class="gift">
+                        <span class="gpic">{#if g.pictureUrl}<img src={g.pictureUrl} alt="" />{:else}<Icon name="market" size={24} />{/if}</span>
+                        <span class="gtext">
+                          <small>{mine ? "You sent a gift" : `${m.senderName || "They"} sent you a gift`}</small>
+                          <b>{g.itemName || "An item"}{#if g.variantName} · {g.variantName}{/if}</b>
+                          {#if g.status === "pending" && !mine}
+                            <span class="gbtns">
+                              <Button size="sm" variant="primary" busy={answering === g.id} onclick={() => answerGift(m, true)}>Accept</Button>
+                              <Button size="sm" disabled={answering === g.id} onclick={() => answerGift(m, false)}>Decline</Button>
+                            </span>
+                          {:else}
+                            <small class="gstate {g.status}">{g.status === "accepted" ? "Accepted" : g.status === "rejected" ? "Declined" : "Waiting for them to accept"}</small>
+                          {/if}
+                        </span>
+                      </div>
+                    {:else}
+                      <p class="bubble" class:note={!m.body}>{m.body || kindNote(m)}</p>
+                    {/if}
                     <button class="reply" onclick={() => reply(m)} aria-label="Reply to this message" title="Reply"><Icon name="back" size={14} /></button>
                   </div>
                   {#if endsGroup(i)}<small class="time">{clock(m.sentAt)}</small>{/if}
@@ -390,6 +481,9 @@
               onkeydown={keydown}
               oninput={typed}
             ></textarea>
+            {#if giftTo}
+              <button class="gift-btn" type="button" onclick={openGifts} aria-label="Send a gift" title="Send a gift"><Icon name="gift" size={19} /></button>
+            {/if}
             <button class="send" type="submit" disabled={!text.trim() || sending} aria-label="Send"><Icon name="send" size={18} /></button>
           </div>
         </form>
@@ -403,6 +497,56 @@
     </section>
   {/if}
 </div>
+
+{#if gifting && header}
+  <Modal title={giftConfirm && giftPick ? `Gift ${giftPick.name}?` : "Send a gift"} onclose={closeGifts}>
+    {#if giftConfirm && giftPick}
+      <div class="gconfirm">
+        <span class="gpic big">{#if giftPick.pictureUrl}<img src={giftPick.pictureUrl} alt="" />{:else}<Icon name="market" size={32} />{/if}</span>
+        <div>
+          <p><b>{giftPick.name}</b> for <b>{header.name}</b></p>
+          <p class="faint">Costs {lunes(giftPick.price ?? 0)}.{#if luduvo.coins != null}{" "}You have {luduvo.coins.toLocaleString()} Lunes{giftPick.price ? `, ${Math.max(0, luduvo.coins - giftPick.price).toLocaleString()} after` : ""}.{/if}</p>
+          {#if tooDear}<p class="err">You don't have enough Lunes. <button class="link" onclick={buyLunes}>Buy Lunes</button></p>{/if}
+        </div>
+      </div>
+    {:else}
+      <p class="faint">Choose a store item to send to {header.name}.</p>
+      <label class="search gsearch">
+        <Icon name="search" size={15} />
+        <!-- svelte-ignore a11y_autofocus -->
+        <input bind:value={giftSearch} oninput={giftSearchChanged} placeholder="Search store items" spellcheck="false" autocomplete="off" aria-label="Search store items" autofocus />
+      </label>
+      {#if giftError}
+        <p class="err">{giftError}</p>
+      {:else if !giftItems}
+        <p class="faint">Loading store items…</p>
+      {:else if giftItems.length === 0}
+        <p class="faint">No giftable items found.</p>
+      {:else}
+        <ul class="gitems" role="listbox" aria-label="Store items">
+          {#each giftItems as it (it.id)}
+            <li>
+              <button role="option" aria-selected={giftPick?.id === it.id} class:on={giftPick?.id === it.id} onclick={() => (giftPick = it)}>
+                <span class="gpic">{#if it.pictureUrl}<img src={it.pictureUrl} alt="" loading="lazy" />{:else}<Icon name="market" size={18} />{/if}</span>
+                <span class="gname"><b>{it.name}</b><small>{lunes(it.price ?? 0)}</small></span>
+                {#if giftPick?.id === it.id}<Icon name="check" size={16} />{/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+    {#snippet actions()}
+      {#if giftConfirm}
+        <Button onclick={() => (giftConfirm = false)}>Back</Button>
+        <Button variant="primary" busy={giftSending} disabled={tooDear} onclick={sendGift}>{giftPick?.price ? `Yes, pay ${giftPick.price.toLocaleString()} Lunes` : "Yes, send it"}</Button>
+      {:else}
+        <Button onclick={closeGifts}>Cancel</Button>
+        <Button variant="primary" icon="gift" disabled={!giftPick} onclick={() => (giftConfirm = true)}>{giftPick ? `Gift for ${lunes(giftPick.price ?? 0)}` : "Gift"}</Button>
+      {/if}
+    {/snippet}
+  </Modal>
+{/if}
 
 {#if picking}
   <Modal title="New message" onclose={() => ((picking = false), (pickSearch = ""))}>
@@ -427,12 +571,17 @@
 {/if}
 
 <style>
+  /* The page fills the panel exactly, so only the chat list and the conversation scroll. */
+  :global(main:has(> .messages)) {
+    overflow: hidden;
+    padding-bottom: var(--s-4);
+  }
   .messages {
     display: grid;
     grid-template-columns: 300px 1fr;
     gap: var(--s-3);
-    height: calc(100vh - var(--topbar-h) - var(--s-6));
-    min-height: 420px;
+    height: 100%;
+    min-height: 0;
     padding-right: var(--s-4);
   }
   .list,
@@ -779,6 +928,135 @@
     gap: var(--s-3);
     color: var(--text-2);
   }
+  .gift-btn {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: none;
+    color: var(--text-1);
+    cursor: pointer;
+  }
+  .gift-btn:hover {
+    background: var(--glass-hover);
+    color: var(--frost);
+  }
+  .gift {
+    display: flex;
+    gap: var(--s-3);
+    padding: var(--s-3);
+    border-radius: 16px;
+    border: 1px solid var(--line-strong);
+    background: var(--glass-strong);
+    min-width: 240px;
+  }
+  .gpic {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    flex: none;
+    border-radius: var(--r-md);
+    background: var(--glass);
+    color: var(--text-2);
+    overflow: hidden;
+  }
+  .gpic.big {
+    width: 80px;
+    height: 80px;
+  }
+  .gpic img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .gtext {
+    display: grid;
+    gap: 3px;
+    align-content: center;
+  }
+  .gtext small {
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .gstate.accepted {
+    color: var(--ok);
+  }
+  .gbtns {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .gsearch {
+    margin: var(--s-2) 0 var(--s-3);
+  }
+  .gitems {
+    display: grid;
+    gap: 2px;
+    max-height: 300px;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+  }
+  .gitems button {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .gitems button:hover {
+    background: var(--glass-hover);
+  }
+  .gitems button.on {
+    background: var(--glass-strong);
+    color: var(--frost);
+  }
+  .gitems .gpic {
+    width: 40px;
+    height: 40px;
+  }
+  .gname {
+    flex: 1;
+    display: grid;
+    min-width: 0;
+  }
+  .gname small {
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+  .gconfirm {
+    display: flex;
+    gap: var(--s-4);
+    align-items: center;
+  }
+  .gconfirm p {
+    margin: 0 0 4px;
+  }
+  .err {
+    color: var(--danger);
+    font-size: var(--fs-sm);
+  }
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--frost);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
   .pick-search {
     width: 100%;
     height: 36px;
@@ -823,6 +1101,9 @@
     font-size: var(--fs-xs);
   }
   @media (max-width: 860px) {
+    :global(main:has(> .messages)) {
+      overflow-y: auto;
+    }
     .messages {
       grid-template-columns: 1fr;
       height: auto;

@@ -623,6 +623,7 @@ export interface LuduvoMessage {
   /** Unix seconds. */
   sentAt: number;
   replyTo: { id: number; senderId: number | null; senderName: string; body: string } | null;
+  gift: LuduvoGift | null;
   /** "gift" or another kind Vodka shows as a note instead of text. */
   kind: string;
 }
@@ -632,4 +633,14 @@ export interface LuduvoMessagePage {
   messages: LuduvoMessage[];
   lastReadId: number;
   more: boolean;
+}
+
+export interface LuduvoGift {
+  id: number;
+  itemId: number;
+  itemName: string;
+  variantName: string;
+  pictureUrl: string | null;
+  /** "pending", "accepted" or "rejected". */
+  status: string;
 }

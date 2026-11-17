@@ -62,10 +62,11 @@ let luduvoChats = [
   { id: 4, kind: "direct", name: "Pixel_Pixe", peerId: 77, peerUsername: "Pixel_Pixe", unread: 1, lastMessageId: 92, lastReadId: 91, lastBody: "im finishing my flight sim rn", lastSenderId: 77, lastSentAt: Math.floor(Date.now() / 1000) - 3600 },
   { id: 6, kind: "direct", name: "joao", peerId: 78, peerUsername: "joao", unread: 0, lastMessageId: 80, lastReadId: 80, lastBody: "Join me in Hide N Seek!", lastSenderId: 78, lastSentAt: Math.floor(Date.now() / 1000) - 3 * 3600 },
 ];
-const luduvoMsgs: Record<number, { id: number; senderId: number; senderName: string; body: string; sentAt: number; replyTo: null | { id: number; senderId: number | null; senderName: string; body: string }; kind: string }[]> = {
+const luduvoMsgs: Record<number, { id: number; senderId: number; senderName: string; body: string; sentAt: number; replyTo: null | { id: number; senderId: number | null; senderName: string; body: string }; gift?: null | { id: number; itemId: number; itemName: string; variantName: string; pictureUrl: string | null; status: string }; kind: string }[]> = {
   4: [
     { id: 91, senderId: 77, senderName: "Pixel_Pixe", body: "hiiii", sentAt: Math.floor(Date.now() / 1000) - 3700, replyTo: null, kind: "" },
     { id: 92, senderId: 77, senderName: "Pixel_Pixe", body: "im finishing my flight sim rn", sentAt: Math.floor(Date.now() / 1000) - 3600, replyTo: null, kind: "" },
+    { id: 93, senderId: 77, senderName: "Pixel_Pixe", body: "", sentAt: Math.floor(Date.now() / 1000) - 3500, replyTo: null, kind: "gift", gift: { id: 3, itemId: 1, itemName: "Winter Beanie", variantName: "", pictureUrl: null, status: "pending" } },
   ],
   6: [{ id: 80, senderId: 78, senderName: "joao", body: "Join me in Hide N Seek!", sentAt: Math.floor(Date.now() / 1000) - 3 * 3600, replyTo: null, kind: "" }],
 };
@@ -772,7 +773,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_send_message": {
       const list = (luduvoMsgs[args.conversation as number] ??= []);
       const replied = list.find((m) => m.id === args.replyTo);
-      const m = { id: Math.max(100, ...list.map((x) => x.id)) + 1, senderId: ME_LUDUVO, senderName: "PuppyGirl", body: String(args.body), sentAt: Math.floor(Date.now() / 1000), replyTo: replied ? { id: replied.id, senderId: replied.senderId, senderName: replied.senderName, body: replied.body } : null, kind: "" };
+      const m = { id: Math.max(100, ...list.map((x) => x.id)) + 1, senderId: ME_LUDUVO, senderName: "PuppyGirl", body: String(args.body), sentAt: Math.floor(Date.now() / 1000), replyTo: replied ? { id: replied.id, senderId: replied.senderId, senderName: replied.senderName, body: replied.body } : null, gift: null, kind: "" };
       list.push(m);
       luduvoChats = luduvoChats.map((c) => (c.id === args.conversation ? { ...c, lastBody: m.body, lastSenderId: ME_LUDUVO, lastSentAt: m.sentAt, lastMessageId: m.id } : c));
       return m;
@@ -785,6 +786,23 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     }
     case "luduvo_mark_read":
       luduvoChats = luduvoChats.map((c) => (c.id === args.conversation ? { ...c, unread: 0, lastReadId: args.messageId as number } : c));
+      return null;
+    case "luduvo_gift_item": {
+      await wait(400);
+      const it = DEMO_ITEMS.find((i) => i.id === args.itemId);
+      if (!it || it.price == null || it.price !== args.agreedPrice) throw { kind: "other", message: "The price changed since you looked. Check it and confirm again." };
+      if (it.price > luduvoCoins) throw { kind: "other", message: "Luduvo: You don't have enough Lunes." };
+      luduvoCoins -= it.price;
+      const chat = luduvoChats.find((c) => c.peerId === args.toUser);
+      if (chat) {
+        const list = (luduvoMsgs[chat.id] ??= []);
+        list.push({ id: Math.max(100, ...list.map((x) => x.id)) + 1, senderId: ME_LUDUVO, senderName: "PuppyGirl", body: "", sentAt: Math.floor(Date.now() / 1000), replyTo: null, kind: "gift", gift: { id: 9, itemId: it.id, itemName: it.name, variantName: "", pictureUrl: null, status: "pending" } });
+      }
+      return luduvoCoins;
+    }
+    case "luduvo_answer_gift":
+      await wait(300);
+      for (const list of Object.values(luduvoMsgs)) for (const m of list) if (m.gift && m.gift.id === args.giftId) m.gift.status = args.accept ? "accepted" : "rejected";
       return null;
     case "luduvo_typing":
       return null;

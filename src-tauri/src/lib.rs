@@ -1321,6 +1321,17 @@ async fn luduvo_buy_item(state: State<'_, AppState>, item_id: u64, agreed_price:
 }
 
 #[tauri::command]
+async fn luduvo_gift_item(state: State<'_, AppState>, item_id: u64, to_user: u64, agreed_price: u64) -> Result<Option<i64>> {
+    state.luduvo.gift_item(item_id, to_user, agreed_price).await?;
+    state.luduvo.balance().await
+}
+
+#[tauri::command]
+async fn luduvo_answer_gift(state: State<'_, AppState>, gift_id: u64, accept: bool) -> Result<()> {
+    state.luduvo.answer_gift(gift_id, accept).await
+}
+
+#[tauri::command]
 async fn luduvo_add_friend(state: State<'_, AppState>, username: String) -> Result<()> {
     state.luduvo.add_friend(&username).await
 }
@@ -1641,6 +1652,8 @@ pub fn run() {
             luduvo_rate_item,
             luduvo_favorite_item,
             luduvo_buy_item,
+            luduvo_gift_item,
+            luduvo_answer_gift,
             luduvo_add_friend,
             luduvo_remove_friend,
             luduvo_avatar,

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Luduvo Messages: send a gift from the gift button next to Send. Pick a store item, see the price and your Lunes, confirm, and it arrives in the chat. Gifts you get show as a card with Accept and Decline.
+- Luduvo Messages: the page fits the window, so there's no extra scrollbar on the right.
+
 ## 0.4.0 (2026-11-17)
 
 Luduvo Messages, playtime tracking, and a friends panel you can hide.
