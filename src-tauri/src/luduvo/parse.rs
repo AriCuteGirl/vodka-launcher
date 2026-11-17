@@ -394,9 +394,14 @@ pub fn owned_list(v: &Value) -> Vec<OwnedItem> {
 }
 
 /// One colour of an item, from `/items/{id}/variants`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Variant {
     pub index: u64,
+    /// Can be bought or gifted now.
+    pub on_sale: bool,
+    /// Its own price in Lunes, when it has one.
+    pub price: Option<u64>,
     pub name: String,
     /// `#RRGGBB`, only when it is one.
     pub color: Option<String>,
@@ -415,6 +420,8 @@ pub fn variants(v: &Value) -> Vec<Variant> {
                 .filter_map(|x| {
                     Some(Variant {
                         index: x.get("variant_index")?.as_u64()?,
+                        on_sale: x.get("is_on_sale").and_then(Value::as_bool).unwrap_or(true),
+                        price: x.get("price").and_then(Value::as_u64),
                         name: text(x, "name"),
                         color: x
                             .get("hex_code")
@@ -1108,10 +1115,10 @@ mod tests {
     #[test]
     fn reads_colour_variants() {
         let l = variants(&json!({ "variants": [
-            { "variant_index": 1, "name": "White", "hex_code": "#EDEDED", "thumbnail_key": "item_previews/1738/v1/ab.png" },
+            { "variant_index": 1, "name": "White", "hex_code": "#EDEDED", "price": 5, "thumbnail_key": "item_previews/1738/v1/ab.png" },
             { "variant_index": 2, "name": "Odd", "hex_code": "red; x", "thumbnail_key": "../x.png" }
         ] }));
-        assert_eq!(l[0], Variant { index: 1, name: "White".into(), color: Some("#EDEDED".into()), picture_url: Some("https://assets.luduvo.com/item_previews/1738/v1/ab.png".into()) });
+        assert_eq!(l[0], Variant { index: 1, on_sale: true, price: Some(5), name: "White".into(), color: Some("#EDEDED".into()), picture_url: Some("https://assets.luduvo.com/item_previews/1738/v1/ab.png".into()) });
         assert_eq!((l[1].color.as_deref(), l[1].picture_url.as_deref()), (None, None));
     }
 

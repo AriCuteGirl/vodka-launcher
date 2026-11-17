@@ -8,7 +8,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Conversation, Message, MessagePage, Friend, Group, OwnedItem, Outfit, Profile, Place, PlaceDetails, Rating, Server, Shelf, StoreCategory, StoreItem, User};
+pub use parse::{Variant, Conversation, Message, MessagePage, Friend, Group, OwnedItem, Outfit, Profile, Place, PlaceDetails, Rating, Server, Shelf, StoreCategory, StoreItem, User};
 use reqwest::{Method, StatusCode, Url, header};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -236,11 +236,27 @@ fn explain(status: StatusCode, body: &str) -> AppError {
         return AppError::Other("This game needs paid access. Buy it on luduvo.com first.".into());
     }
     // Luduvo's own messages are short sentences meant for players; show them, but never a whole page of HTML.
-    let message = json.get("message").or_else(|| json.get("error")).and_then(|v| v.as_str()).filter(|m| m.contains(' ') && m.len() < 200);
-    match message {
-        Some(m) => AppError::Other(format!("Luduvo: {m}")),
-        None => AppError::Other(format!("Luduvo sent a response Vodka didn't understand (HTTP {}).", status.as_u16())),
+    let message = ["message", "error", "detail"]
+        .iter()
+        .find_map(|k| json.get(*k).and_then(|v| v.as_str()))
+        .filter(|m| m.contains(' ') && m.len() < 200);
+    if let Some(m) = message {
+        return AppError::Other(format!("Luduvo: {m}"));
     }
+    // A bare code such as `gift_not_allowed`: still better than nothing, read out as words.
+    let code = ["code", "error"].iter().find_map(|k| json.get(*k).and_then(|v| v.as_str())).filter(|c| {
+        (3..60).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit())
+    });
+    if let Some(c) = code {
+        let words = c.replace('_', " ");
+        let mut chars = words.chars();
+        let words = chars.next().map(|f| f.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
+        return AppError::Other(format!("Luduvo: {words} (HTTP {}).", status.as_u16()));
+    }
+    if status == StatusCode::FORBIDDEN {
+        return AppError::Other("Luduvo refused that (HTTP 403). It may need a captcha or not be allowed for this account; try it on luduvo.com.".into());
+    }
+    AppError::Other(format!("Luduvo sent a response Vodka didn't understand (HTTP {}).", status.as_u16()))
 }
 
 pub struct Client {
@@ -532,18 +548,32 @@ impl Client {
     }
 
     /// Buys `id` for someone else at the price you agreed to; it arrives in your chat with them as a gift.
-    pub async fn gift_item(&self, id: u64, to_user: u64, agreed_price: u64) -> Result<()> {
-        let current = self.store_item(id).await?;
-        if current.price != Some(agreed_price) {
+    pub async fn gift_item(&self, id: u64, to_user: u64, agreed_price: u64, variant: Option<u64>) -> Result<()> {
+        let item = self.store_item(id).await?;
+        // A colour can have its own price; that's the one Luduvo charges.
+        let price = match variant {
+            Some(v) => self.item_variants(id).await?.into_iter().find(|x| x.index == v).and_then(|x| x.price).or(item.price),
+            None => item.price,
+        };
+        if price != Some(agreed_price) {
             return Err(AppError::Other("The price changed since you looked. Check it and confirm again.".into()));
+        }
+        if agreed_price == 0 {
+            return Err(AppError::Other("Free items can't be gifted.".into()));
         }
         self.authed_with(
             Method::POST,
             &format!("/store/{id}/gift"),
-            Some(&serde_json::json!({ "expected_price": agreed_price, "to_user": to_user, "variant_index": 0 })),
+            Some(&serde_json::json!({ "expected_price": agreed_price, "to_user": to_user, "variant_index": variant })),
         )
         .await?;
         Ok(())
+    }
+
+    /// An item's colours that can be bought or gifted now.
+    pub async fn item_variants(&self, id: u64) -> Result<Vec<parse::Variant>> {
+        let json = self.public(&format!("/items/{id}/variants")).await?;
+        Ok(parse::variants(&json))
     }
 
     /// Accepts or declines a gift someone sent you.
@@ -1085,6 +1115,10 @@ mod tests {
         assert!(e.to_string().contains("too quickly"));
         let e = explain(StatusCode::BAD_REQUEST, "<html>nope</html>");
         assert!(e.to_string().contains("HTTP 400"));
+        let e = explain(StatusCode::FORBIDDEN, r#"{"error":"gift_not_allowed"}"#);
+        assert_eq!(e.to_string(), "Luduvo: Gift not allowed (HTTP 403).");
+        let e = explain(StatusCode::FORBIDDEN, r#"{"error":"You can only gift friends."}"#);
+        assert_eq!(e.to_string(), "Luduvo: You can only gift friends.");
     }
 }
 

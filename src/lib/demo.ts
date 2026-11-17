@@ -790,7 +790,7 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_gift_item": {
       await wait(400);
       const it = DEMO_ITEMS.find((i) => i.id === args.itemId);
-      if (!it || it.price == null || it.price !== args.agreedPrice) throw { kind: "other", message: "The price changed since you looked. Check it and confirm again." };
+      if (!it || it.price == null || (args.variant == null && it.price !== args.agreedPrice)) throw { kind: "other", message: "The price changed since you looked. Check it and confirm again." };
       if (it.price > luduvoCoins) throw { kind: "other", message: "Luduvo: You don't have enough Lunes." };
       luduvoCoins -= it.price;
       const chat = luduvoChats.find((c) => c.peerId === args.toUser);
@@ -800,6 +800,14 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       }
       return luduvoCoins;
     }
+    case "luduvo_item_variants":
+      await wait(150);
+      return args.itemId === 1
+        ? [
+            { index: 1, onSale: true, price: 25, name: "Red", color: "#A11F1F", pictureUrl: null },
+            { index: 2, onSale: true, price: 30, name: "Blue", color: "#3B6FD8", pictureUrl: null },
+          ]
+        : [];
     case "luduvo_answer_gift":
       await wait(300);
       for (const list of Object.values(luduvoMsgs)) for (const m of list) if (m.gift && m.gift.id === args.giftId) m.gift.status = args.accept ? "accepted" : "rejected";

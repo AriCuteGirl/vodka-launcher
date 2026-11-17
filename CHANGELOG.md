@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Luduvo Messages: send a gift from the gift button next to Send. Pick a store item, see the price and your Lunes, confirm, and it arrives in the chat. Gifts you get show as a card with Accept and Decline.
+- Luduvo Messages: send a gift from the gift button next to Send. Pick a store item, see the price and your Lunes, confirm, and it arrives in the chat. Gifts you get show as a card with Accept and Decline. Like on luduvo.com, free and limited items can't be gifted, and items that come in colours let you pick one (at that colour's price).
+- Luduvo errors that come as a short code are shown as words instead of "a response Vodka didn't understand".
 - Luduvo Messages: the page fits the window, so there's no extra scrollbar on the right.
 
 ## 0.4.0 (2026-11-17)

@@ -644,3 +644,13 @@ export interface LuduvoGift {
   /** "pending", "accepted" or "rejected". */
   status: string;
 }
+
+/** One colour of a Luduvo item. */
+export interface LuduvoVariant {
+  index: number;
+  onSale: boolean;
+  price: number | null;
+  name: string;
+  color: string | null;
+  pictureUrl: string | null;
+}

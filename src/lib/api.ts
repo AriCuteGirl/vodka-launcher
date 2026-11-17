@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { LuduvoConversation, LuduvoMessage, LuduvoMessagePage, Played, LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { LuduvoVariant, LuduvoConversation, LuduvoMessage, LuduvoMessagePage, Played, LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -134,8 +134,9 @@ export const api = {
   luduvoRateItem: (itemId: number, value: number) => call<LuduvoItem>("luduvo_rate_item", { itemId, value }),
   luduvoFavoriteItem: (itemId: number, on: boolean) => call<void>("luduvo_favorite_item", { itemId, on }),
   /** Buys at exactly the confirmed price; resolves to the new balance. */
-  luduvoGiftItem: (itemId: number, toUser: number, agreedPrice: number) =>
-    call<number | null>("luduvo_gift_item", { itemId, toUser, agreedPrice }),
+  luduvoGiftItem: (itemId: number, toUser: number, agreedPrice: number, variant: number | null) =>
+    call<number | null>("luduvo_gift_item", { itemId, toUser, agreedPrice, variant }),
+  luduvoItemVariants: (itemId: number) => call<LuduvoVariant[]>("luduvo_item_variants", { itemId }),
   luduvoAnswerGift: (giftId: number, accept: boolean) => call<void>("luduvo_answer_gift", { giftId, accept }),
   luduvoBuyItem: (itemId: number, agreedPrice: number) => call<number | null>("luduvo_buy_item", { itemId, agreedPrice }),
   luduvoProfile: (userId: number) => call<LuduvoProfile>("luduvo_profile", { userId }),

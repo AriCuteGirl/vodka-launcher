@@ -10,7 +10,7 @@
   import { headshot, loadChats, luduvoChat } from "$lib/luduvo-chat.svelte";
   import { buyLunes, loadBalance, luduvo, luduvoSignIn, startLuduvo } from "$lib/luduvo.svelte";
   import { toast } from "$lib/state.svelte";
-  import { toAppError, type LuduvoConversation, type LuduvoFriend, type LuduvoItem, type LuduvoMessage } from "$lib/types";
+  import { toAppError, type LuduvoConversation, type LuduvoFriend, type LuduvoItem, type LuduvoMessage, type LuduvoVariant } from "$lib/types";
   import { onDestroy, onMount, tick } from "svelte";
 
   // Luduvo Messages, laid out like luduvo.com: your chats on the left, the open one on the right.
@@ -224,7 +224,25 @@
   let giftConfirm = $state(false);
   let giftSending = $state(false);
   let giftRun = 0;
-  const giftable = (i: LuduvoItem) => i.price != null && !i.limited;
+  // Luduvo's rules: no free items, no limiteds.
+  const giftable = (i: LuduvoItem) => i.price != null && i.price > 0 && !i.limited;
+  let variants = $state<LuduvoVariant[] | null>(null);
+  let variant = $state<LuduvoVariant | null>(null);
+  async function pick(it: LuduvoItem) {
+    giftPick = it;
+    variants = null;
+    variant = null;
+    try {
+      const list = (await api.luduvoItemVariants(it.id)).filter((v) => v.onSale);
+      if (giftPick?.id !== it.id) return;
+      variants = list;
+      variant = list.find((v) => (v.price ?? it.price ?? 0) > 0) ?? null;
+    } catch {
+      if (giftPick?.id === it.id) variants = [];
+    }
+  }
+  /** What this gift costs: the colour's own price when it has one. */
+  const giftPrice = $derived(giftPick ? (variant?.price ?? giftPick.price ?? 0) : 0);
   async function findGifts() {
     const run = ++giftRun;
     giftError = null;
@@ -243,6 +261,8 @@
   function openGifts() {
     gifting = true;
     giftPick = null;
+    variants = null;
+    variant = null;
     giftConfirm = false;
     if (!giftItems) void findGifts();
     void loadBalance(true);
@@ -253,12 +273,13 @@
     giftPick = null;
   }
   const giftTo = $derived(open?.kind === "direct" ? open.peerId : null);
-  const tooDear = $derived(!!giftPick && giftPick.price != null && luduvo.coins != null && giftPick.price > luduvo.coins);
+  const tooDear = $derived(!!giftPick && luduvo.coins != null && giftPrice > luduvo.coins);
+  const giftReady = $derived(!!giftPick && variants != null && giftPrice > 0);
   async function sendGift() {
-    if (!giftPick || giftPick.price == null || !giftTo || giftSending) return;
+    if (!giftPick || !giftReady || !giftTo || giftSending) return;
     giftSending = true;
     try {
-      const balance = await api.luduvoGiftItem(giftPick.id, giftTo, giftPick.price);
+      const balance = await api.luduvoGiftItem(giftPick.id, giftTo, giftPrice, variant?.index ?? null);
       if (balance != null) luduvo.coins = balance;
       toast(`Sent ${giftPick.name} to ${header?.name ?? "them"}.`, "ok");
       closeGifts();
@@ -502,10 +523,10 @@
   <Modal title={giftConfirm && giftPick ? `Gift ${giftPick.name}?` : "Send a gift"} onclose={closeGifts}>
     {#if giftConfirm && giftPick}
       <div class="gconfirm">
-        <span class="gpic big">{#if giftPick.pictureUrl}<img src={giftPick.pictureUrl} alt="" />{:else}<Icon name="market" size={32} />{/if}</span>
+        <span class="gpic big">{#if variant?.pictureUrl ?? giftPick.pictureUrl}<img src={variant?.pictureUrl ?? giftPick.pictureUrl} alt="" />{:else}<Icon name="market" size={32} />{/if}</span>
         <div>
-          <p><b>{giftPick.name}</b> for <b>{header.name}</b></p>
-          <p class="faint">Costs {lunes(giftPick.price ?? 0)}.{#if luduvo.coins != null}{" "}You have {luduvo.coins.toLocaleString()} Lunes{giftPick.price ? `, ${Math.max(0, luduvo.coins - giftPick.price).toLocaleString()} after` : ""}.{/if}</p>
+          <p><b>{giftPick.name}</b>{#if variant} · {variant.name}{/if} for <b>{header.name}</b></p>
+          <p class="faint">Costs {lunes(giftPrice)}.{#if luduvo.coins != null}{" "}You have {luduvo.coins.toLocaleString()} Lunes, {Math.max(0, luduvo.coins - giftPrice).toLocaleString()} after.{/if} This can't be undone.</p>
           {#if tooDear}<p class="err">You don't have enough Lunes. <button class="link" onclick={buyLunes}>Buy Lunes</button></p>{/if}
         </div>
       </div>
@@ -526,7 +547,7 @@
         <ul class="gitems" role="listbox" aria-label="Store items">
           {#each giftItems as it (it.id)}
             <li>
-              <button role="option" aria-selected={giftPick?.id === it.id} class:on={giftPick?.id === it.id} onclick={() => (giftPick = it)}>
+              <button role="option" aria-selected={giftPick?.id === it.id} class:on={giftPick?.id === it.id} onclick={() => pick(it)}>
                 <span class="gpic">{#if it.pictureUrl}<img src={it.pictureUrl} alt="" loading="lazy" />{:else}<Icon name="market" size={18} />{/if}</span>
                 <span class="gname"><b>{it.name}</b><small>{lunes(it.price ?? 0)}</small></span>
                 {#if giftPick?.id === it.id}<Icon name="check" size={16} />{/if}
@@ -534,15 +555,26 @@
             </li>
           {/each}
         </ul>
+        {#if giftPick && variants && variants.length > 0}
+          <div class="colours" role="radiogroup" aria-label="Colour">
+            {#each variants as v (v.index)}
+              <button role="radio" aria-checked={variant?.index === v.index} class:on={variant?.index === v.index} onclick={() => (variant = v)}>
+                <span class="sw" style:background={v.color ?? "transparent"}></span>{v.name || `Colour ${v.index}`}
+                {#if v.price != null && v.price !== giftPick.price}<small>{lunes(v.price)}</small>{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+        {#if giftPick && variants != null && giftPrice === 0}<p class="err">Free items can't be gifted.</p>{/if}
       {/if}
     {/if}
     {#snippet actions()}
       {#if giftConfirm}
         <Button onclick={() => (giftConfirm = false)}>Back</Button>
-        <Button variant="primary" busy={giftSending} disabled={tooDear} onclick={sendGift}>{giftPick?.price ? `Yes, pay ${giftPick.price.toLocaleString()} Lunes` : "Yes, send it"}</Button>
+        <Button variant="primary" busy={giftSending} disabled={tooDear || !giftReady} onclick={sendGift}>Yes, pay {giftPrice.toLocaleString()} Lunes</Button>
       {:else}
         <Button onclick={closeGifts}>Cancel</Button>
-        <Button variant="primary" icon="gift" disabled={!giftPick} onclick={() => (giftConfirm = true)}>{giftPick ? `Gift for ${lunes(giftPick.price ?? 0)}` : "Gift"}</Button>
+        <Button variant="primary" icon="gift" disabled={!giftReady} busy={!!giftPick && variants == null} onclick={() => (giftConfirm = true)}>{giftReady ? `Gift for ${lunes(giftPrice)}` : "Gift"}</Button>
       {/if}
     {/snippet}
   </Modal>
@@ -1035,6 +1067,37 @@
   .gname small {
     color: var(--text-2);
     font-size: var(--fs-xs);
+  }
+  .colours {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: var(--s-3);
+  }
+  .colours button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 4px 6px;
+    border-radius: var(--r-full);
+    border: 1px solid var(--line);
+    background: var(--glass);
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  .colours button.on {
+    border-color: var(--frost);
+    color: var(--text-0);
+  }
+  .colours small {
+    color: var(--text-2);
+  }
+  .sw {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.25);
   }
   .gconfirm {
     display: flex;
