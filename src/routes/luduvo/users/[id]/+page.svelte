@@ -105,6 +105,9 @@
             {#if p.state === "in_game" && p.joinable && asFriend && !me}
               <Button variant="primary" size="lg" icon="play" disabled={!!luduvo.playing || !luduvo.user} onclick={() => asFriend && joinLuduvoFriend(asFriend)}>Join {p.displayName}</Button>
             {/if}
+            {#if asFriend && !me}
+              <Button size="lg" icon="chat" onclick={() => goto(`/luduvo/messages?to=${p.id}`)}>Message</Button>
+            {/if}
             {#if p.placeId}
               <Button size="lg" icon="games" onclick={() => goto(`/luduvo/games/${p.placeId}`)}>Open the game</Button>
             {/if}

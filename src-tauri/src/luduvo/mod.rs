@@ -8,7 +8,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Friend, Group, OwnedItem, Outfit, Profile, Place, PlaceDetails, Rating, Server, Shelf, StoreCategory, StoreItem, User};
+pub use parse::{Conversation, Message, MessagePage, Friend, Group, OwnedItem, Outfit, Profile, Place, PlaceDetails, Rating, Server, Shelf, StoreCategory, StoreItem, User};
 use reqwest::{Method, StatusCode, Url, header};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -753,6 +753,63 @@ impl Client {
         #[cfg(debug_assertions)]
         eprintln!("[luduvo] pending shape: {}", parse::shape(&json));
         Ok(parse::friend_list(&json))
+    }
+
+    /// Your chats, most recent first.
+    pub async fn conversations(&self) -> Result<Vec<Conversation>> {
+        let json = self.authed(Method::GET, "/me/conversations?limit=100&offset=0").await?;
+        #[cfg(debug_assertions)]
+        eprintln!("[luduvo] conversations shape: {}", parse::shape(&json));
+        Ok(parse::conversations(&json))
+    }
+
+    /// The latest messages in a chat, or the ones before `before_id`.
+    pub async fn messages(&self, conversation: u64, before_id: Option<u64>) -> Result<MessagePage> {
+        const PAGE: usize = 50;
+        let before = before_id.map(|id| format!("&before_id={id}")).unwrap_or_default();
+        let json = self.authed(Method::GET, &format!("/conversations/{conversation}/messages?limit={PAGE}{before}")).await?;
+        #[cfg(debug_assertions)]
+        eprintln!("[luduvo] messages shape: {}", parse::shape(&json));
+        Ok(parse::message_page(&json, PAGE))
+    }
+
+    /// Messages newer than `after_id`, oldest first.
+    pub async fn messages_since(&self, conversation: u64, after_id: u64) -> Result<Vec<Message>> {
+        let json = self.authed(Method::GET, &format!("/conversations/{conversation}/messages/since?message_id={after_id}&limit=50")).await?;
+        Ok(parse::message_page(&json, 50).messages)
+    }
+
+    /// Sends a message, as a reply when `reply_to` is set. Returns it when Luduvo sends it back.
+    pub async fn send_message(&self, conversation: u64, body: &str, reply_to: Option<u64>) -> Result<Option<Message>> {
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(AppError::Other("Type a message first.".into()));
+        }
+        let json = self
+            .authed_with(Method::POST, &format!("/conversations/{conversation}/messages"), Some(&serde_json::json!({ "body": body, "reply_to_message_id": reply_to })))
+            .await?;
+        Ok(parse::message(json.get("message").unwrap_or(&json)))
+    }
+
+    /// Starts a direct chat with someone (Luduvo makes it with the first message). Returns the chat's id.
+    pub async fn start_chat(&self, user_id: u64, body: &str) -> Result<u64> {
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(AppError::Other("Type a message first.".into()));
+        }
+        let json = self.authed_with(Method::POST, "/conversations", Some(&serde_json::json!({ "kind": "direct", "user_id": user_id, "body": body }))).await?;
+        json.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| AppError::Api("Luduvo didn't say which chat it made.".into()))
+    }
+
+    pub async fn mark_read(&self, conversation: u64, message_id: u64) -> Result<()> {
+        self.authed_with(Method::POST, &format!("/conversations/{conversation}/read"), Some(&serde_json::json!({ "message_id": message_id }))).await?;
+        Ok(())
+    }
+
+    /// Tells the other side you're typing.
+    pub async fn typing(&self, conversation: u64) -> Result<()> {
+        self.authed(Method::POST, &format!("/conversations/{conversation}/typing")).await?;
+        Ok(())
     }
 
     /// Accepts a request, or declines it the way the website does (by deleting it).

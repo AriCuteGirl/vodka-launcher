@@ -2,6 +2,7 @@
   import { page } from "$app/state";
   import { chat } from "$lib/chat.svelte";
   import { gameOf, pathOf } from "$lib/games";
+  import { unreadChats } from "$lib/luduvo-chat.svelte";
   import Icon from "./Icon.svelte";
 
   // Each game has its own pages; the rail on the left picks the game.
@@ -31,10 +32,11 @@
   </button>
   <ul>
     {#each items as item (item.href)}
+      {@const unread = item.href === "/chat" ? chat.unreadTotal : item.href === "/luduvo/messages" ? unreadChats() : 0}
       <li>
         <a href={item.href} class:active={active(item.href)} aria-current={active(item.href) ? "page" : undefined} aria-label={item.label}>
           <Icon name={item.icon} size={19} />
-          {#if item.href === "/chat" && chat.unreadTotal > 0}<i class="badge">{chat.unreadTotal > 9 ? "9+" : chat.unreadTotal}</i>{/if}
+          {#if unread > 0}<i class="badge">{unread > 9 ? "9+" : unread}</i>{/if}
           <span class="text">{item.label}</span>
           <span class="tip" aria-hidden="true">{item.label}</span>
         </a>

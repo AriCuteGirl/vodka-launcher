@@ -34,4 +34,4 @@ next, one phase at a time. Each item is finished, tested and committed before th
 - [ ] **10.2 Several Luduvo accounts**, like Roblox's Players page.
 - [ ] **10.3 Body colors** in the Avatar page, once Luduvo's call for saving them is known.
 
-Not planned: Luduvo chat (not needed), in-game input automation (against Roblox's rules).
+Not planned: in-game input automation (against Roblox's rules).

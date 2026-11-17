@@ -597,3 +597,39 @@ export interface Played {
   lastPlayed: number;
   sessions: number;
 }
+
+/** One chat in your Luduvo Messages. */
+export interface LuduvoConversation {
+  id: number;
+  /** "direct" or "group". */
+  kind: string;
+  name: string;
+  peerId: number | null;
+  peerUsername: string;
+  unread: number;
+  lastMessageId: number | null;
+  lastReadId: number;
+  lastBody: string;
+  lastSenderId: number | null;
+  /** Unix seconds. */
+  lastSentAt: number | null;
+}
+
+export interface LuduvoMessage {
+  id: number;
+  senderId: number;
+  senderName: string;
+  body: string;
+  /** Unix seconds. */
+  sentAt: number;
+  replyTo: { id: number; senderId: number | null; senderName: string; body: string } | null;
+  /** "gift" or another kind Vodka shows as a note instead of text. */
+  kind: string;
+}
+
+export interface LuduvoMessagePage {
+  /** Oldest first. */
+  messages: LuduvoMessage[];
+  lastReadId: number;
+  more: boolean;
+}

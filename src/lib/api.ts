@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { Played, LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { LuduvoConversation, LuduvoMessage, LuduvoMessagePage, Played, LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -147,6 +147,14 @@ export const api = {
   luduvoOutfits: () => call<LuduvoOutfit[]>("luduvo_outfits"),
   luduvoWearOutfit: (outfitId: number) => call<LuduvoAvatar>("luduvo_wear_outfit", { outfitId }),
   luduvoSaveOutfit: (name: string) => call<LuduvoOutfit[]>("luduvo_save_outfit", { name }),
+  luduvoConversations: () => call<LuduvoConversation[]>("luduvo_conversations"),
+  luduvoMessages: (conversation: number, beforeId: number | null = null) => call<LuduvoMessagePage>("luduvo_messages", { conversation, beforeId }),
+  luduvoMessagesSince: (conversation: number, afterId: number) => call<LuduvoMessage[]>("luduvo_messages_since", { conversation, afterId }),
+  luduvoSendMessage: (conversation: number, body: string, replyTo: number | null) =>
+    call<LuduvoMessage | null>("luduvo_send_message", { conversation, body, replyTo }),
+  luduvoStartChat: (userId: number, body: string) => call<number>("luduvo_start_chat", { userId, body }),
+  luduvoMarkRead: (conversation: number, messageId: number) => call<void>("luduvo_mark_read", { conversation, messageId }),
+  luduvoTyping: (conversation: number) => call<void>("luduvo_typing", { conversation }),
   luduvoRenameOutfit: (outfitId: number, name: string) => call<LuduvoOutfit[]>("luduvo_rename_outfit", { outfitId, name }),
   luduvoUpdateOutfit: (outfitId: number) => call<LuduvoOutfit[]>("luduvo_update_outfit", { outfitId }),
   luduvoDeleteOutfit: (outfitId: number) => call<LuduvoOutfit[]>("luduvo_delete_outfit", { outfitId }),

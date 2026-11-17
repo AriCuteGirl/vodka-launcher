@@ -1380,6 +1380,41 @@ async fn luduvo_save_outfit(state: State<'_, AppState>, name: String) -> Result<
 }
 
 #[tauri::command]
+async fn luduvo_conversations(state: State<'_, AppState>) -> Result<Vec<luduvo::Conversation>> {
+    state.luduvo.conversations().await
+}
+
+#[tauri::command]
+async fn luduvo_messages(state: State<'_, AppState>, conversation: u64, before_id: Option<u64>) -> Result<luduvo::MessagePage> {
+    state.luduvo.messages(conversation, before_id).await
+}
+
+#[tauri::command]
+async fn luduvo_messages_since(state: State<'_, AppState>, conversation: u64, after_id: u64) -> Result<Vec<luduvo::Message>> {
+    state.luduvo.messages_since(conversation, after_id).await
+}
+
+#[tauri::command]
+async fn luduvo_send_message(state: State<'_, AppState>, conversation: u64, body: String, reply_to: Option<u64>) -> Result<Option<luduvo::Message>> {
+    state.luduvo.send_message(conversation, &body, reply_to).await
+}
+
+#[tauri::command]
+async fn luduvo_start_chat(state: State<'_, AppState>, user_id: u64, body: String) -> Result<u64> {
+    state.luduvo.start_chat(user_id, &body).await
+}
+
+#[tauri::command]
+async fn luduvo_mark_read(state: State<'_, AppState>, conversation: u64, message_id: u64) -> Result<()> {
+    state.luduvo.mark_read(conversation, message_id).await
+}
+
+#[tauri::command]
+async fn luduvo_typing(state: State<'_, AppState>, conversation: u64) -> Result<()> {
+    state.luduvo.typing(conversation).await
+}
+
+#[tauri::command]
 async fn luduvo_rename_outfit(state: State<'_, AppState>, outfit_id: u64, name: String) -> Result<Vec<luduvo::Outfit>> {
     state.luduvo.rename_outfit(outfit_id, &name).await?;
     state.luduvo.outfits().await
@@ -1616,6 +1651,13 @@ pub fn run() {
             luduvo_save_outfit,
             luduvo_delete_outfit,
             luduvo_rename_outfit,
+            luduvo_conversations,
+            luduvo_messages,
+            luduvo_messages_since,
+            luduvo_send_message,
+            luduvo_start_chat,
+            luduvo_mark_read,
+            luduvo_typing,
             luduvo_update_outfit,
             ui_log,
             luduvo_profile,
