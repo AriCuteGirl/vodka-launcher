@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { hours, lastPlayed } from "$lib/playtime.svelte";
+  import type { Played } from "$lib/types";
   import Icon from "./Icon.svelte";
   import Skeleton from "./Skeleton.svelte";
 
@@ -14,6 +16,7 @@
     subtitle = null,
     media = [],
     loading = false,
+    played = null,
     actions,
     pills,
     children,
@@ -28,6 +31,8 @@
     /** Wide pictures for the viewer. */
     media?: string[];
     loading?: boolean;
+    /** Your time in this game, as Vodka counted it. */
+    played?: Played | null;
     actions: Snippet;
     pills?: Snippet;
     children?: Snippet;
@@ -64,6 +69,14 @@
         <Skeleton width="140px" height="14px" />
       {/if}
       <div class="actions">{@render actions()}</div>
+      {#if played}
+        <p class="played" title="{played.sessions} recent sessions">
+          <Icon name="clock" size={13} />
+          <b>{hours(played.totalSecs)}</b> on record
+          {#if played.twoWeeksSecs > 0}<span>· {hours(played.twoWeeksSecs)} past 2 weeks</span>{/if}
+          <span>· last played {lastPlayed(played.lastPlayed).toLowerCase()}</span>
+        </p>
+      {/if}
     </div>
   </header>
 
@@ -87,6 +100,18 @@
 </div>
 
 <style>
+  .played {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    margin-top: var(--s-2);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  .played b {
+    color: var(--text-0);
+  }
   .page {
     position: relative;
     display: grid;

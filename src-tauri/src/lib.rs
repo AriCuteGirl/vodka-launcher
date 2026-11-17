@@ -2,6 +2,7 @@ mod accounts;
 mod chat;
 mod error;
 mod luduvo;
+mod playtime;
 #[cfg(not(windows))]
 mod instances;
 #[cfg(windows)]
@@ -37,6 +38,7 @@ pub struct AppState {
     /// The account this window is using. Kept per running Vodka, so two Vodka windows can use
     /// two different accounts; the settings file only remembers which one to start with.
     pub active: std::sync::Mutex<Option<u64>>,
+    pub playtime: playtime::Store,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1127,7 +1129,7 @@ fn run_luduvo(app: &AppHandle, state: &AppState, link: &str, place_id: u64, titl
     let mut child = luduvo::spawn(Some(link))?;
     let pid = child.id().unwrap_or_default();
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default();
-    let running = luduvo::Running { place_id, title, pid, started_at, stage: "checking".into(), done: None, total: None };
+    let running = luduvo::Running { place_id, title, pid, started_at, stage: "checking".into(), done: None, total: None, playing_since: None };
     *state.luduvo.running.lock().unwrap() = Some(running.clone());
     let _ = app.emit("luduvo://changed", ());
     let handle = app.clone();
@@ -1167,6 +1169,9 @@ fn watch_luduvo_start(app: AppHandle, pid: u32, started_at: u64) {
                 match slot.as_mut() {
                     Some(r) if r.pid == pid => {
                         let changed = r.stage != stage || r.done != done || r.total != total;
+                        if stage == "playing" && r.playing_since.is_none() {
+                            r.playing_since = Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(started_at));
+                        }
                         r.stage = stage.clone();
                         r.done = done;
                         r.total = total;
@@ -1441,6 +1446,34 @@ async fn luduvo_open_studio() -> Result<()> {
     luduvo::open_studio()
 }
 
+/// Every few seconds, writes down the games being played, Roblox and Luduvo, so their playtime adds up.
+fn watch_playtime(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            let Ok(dir) = config_dir(&app) else { continue };
+            let state = app.state::<AppState>();
+            let manager = state.instances.clone();
+            let roblox = tokio::task::spawn_blocking(move || instances::list(&manager)).await.unwrap_or_default();
+            let now = playtime::now_secs();
+            for i in roblox.iter().filter(|i| i.phase == "playing") {
+                let start = i.started_at_ms / 1000;
+                state.playtime.note(&dir, "roblox", i.game.universe_id, &i.game.name, i.game.icon_url.as_deref(), start, now);
+            }
+            let luduvo = state.luduvo.running.lock().unwrap().clone();
+            if let Some(r) = luduvo.filter(|r| r.stage == "playing") {
+                state.playtime.note(&dir, "luduvo", r.place_id, &r.title, None, r.playing_since.unwrap_or(r.started_at), now);
+            }
+        }
+    });
+}
+
+#[tauri::command]
+async fn playtime_list(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<playtime::Played>> {
+    let dir = config_dir(&app)?;
+    Ok(state.playtime.list(&dir, playtime::now_secs()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1450,8 +1483,14 @@ pub fn run() {
             chat: chat::Client::new(),
             instances: SharedManager::default(),
             active: std::sync::Mutex::new(None),
+            playtime: playtime::Store::default(),
+        })
+        .setup(|app| {
+            watch_playtime(app.handle().clone());
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            playtime_list,
             mocktail_status,
             begin_login,
             current_account,

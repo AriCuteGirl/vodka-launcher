@@ -89,6 +89,8 @@ pub struct Running {
     /// Content downloaded so far, out of `total`, while `stage` is `content`.
     pub done: Option<u64>,
     pub total: Option<u64>,
+    /// Unix seconds when the game itself opened (after any update or download).
+    pub playing_since: Option<u64>,
 }
 
 /// Whether the launcher Vodka started has turned into the game itself (it replaces itself with `LuduvoGame`).

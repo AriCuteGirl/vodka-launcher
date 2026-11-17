@@ -774,6 +774,14 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       await wait(700);
       luduvoRunning = { placeId: (args.placeId as number) ?? 0, title: String(args.title), pid: 4243, startedAt: Math.floor(Date.now() / 1000), stage: "playing", done: null, total: null };
       return luduvoRunning;
+    case "playtime_list": {
+      const now = Math.floor(Date.now() / 1000);
+      return [
+        { game: "luduvo", id: 7, title: "Fish.io [UPDATE]", iconUrl: null, totalSecs: 13_260, twoWeeksSecs: 5_400, lastPlayed: now - 3_600, sessions: 6 },
+        { game: "roblox", id: 6035872082, title: "RIVALS", iconUrl: null, totalSecs: 98_000, twoWeeksSecs: 7_300, lastPlayed: now - 90_000, sessions: 12 },
+        { game: "roblox", id: 383310974, title: "Adopt Me!", iconUrl: null, totalSecs: 2_400, twoWeeksSecs: 0, lastPlayed: now - 40 * 86_400, sessions: 2 },
+      ];
+    }
     case "luduvo_balance":
       return luduvoCoins;
     case "luduvo_running":

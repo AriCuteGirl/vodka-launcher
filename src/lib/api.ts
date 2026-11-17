@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { Played, LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -123,6 +123,7 @@ export const api = {
   luduvoRate: (placeId: number, value: number) => call<LuduvoRating>("luduvo_rate", { placeId, value }),
   luduvoPlayPrivate: (code: string, placeId: number, title: string) => call<LuduvoRunning>("luduvo_play_private", { code, placeId, title }),
   luduvoJoinGroup: (groupId: number) => call<void>("luduvo_join_group", { groupId }),
+  playtime: () => call<Played[]>("playtime_list"),
   openExternal: (url: string) => call<void>("open_external", { url }),
   luduvoServers: (placeId: number) => call<LuduvoServer[]>("luduvo_servers", { placeId }),
   luduvoPlayServer: (serverId: string, placeId: number, title: string) => call<LuduvoRunning>("luduvo_play_server", { serverId, placeId, title }),

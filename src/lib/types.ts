@@ -583,3 +583,17 @@ export interface LuduvoGroup {
   role: string;
   iconUrl: string | null;
 }
+
+/** Time Vodka has counted in one game. */
+export interface Played {
+  game: GameId;
+  /** Roblox universe id or Luduvo place id. */
+  id: number;
+  title: string;
+  iconUrl: string | null;
+  totalSecs: number;
+  twoWeeksSecs: number;
+  /** Unix seconds. */
+  lastPlayed: number;
+  sessions: number;
+}
