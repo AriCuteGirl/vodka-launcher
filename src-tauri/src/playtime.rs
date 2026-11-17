@@ -151,7 +151,7 @@ impl Store {
     }
 
     /// Takes several games' own totals at once (one write).
-    pub fn raise_all(&self, dir: &Path, game: &str, totals: &[(u64, &str, Option<&str>, u64, Option<u64>)]) {
+    pub fn raise_all(&self, dir: &Path, game: &str, totals: &[Total<'_>]) {
         let _g = self.lock.lock().unwrap();
         let mut all = read(dir);
         let before = all.clone();
@@ -168,6 +168,9 @@ impl Store {
         summary(&read(dir), now)
     }
 }
+
+/// A game's own count: id, title, picture, total seconds, last played.
+pub type Total<'a> = (u64, &'a str, Option<&'a str>, u64, Option<u64>);
 
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default()
