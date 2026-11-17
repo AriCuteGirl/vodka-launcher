@@ -2,6 +2,7 @@ mod accounts;
 mod chat;
 mod error;
 mod luduvo;
+mod playtime;
 #[cfg(not(windows))]
 mod instances;
 #[cfg(windows)]
@@ -37,6 +38,7 @@ pub struct AppState {
     /// The account this window is using. Kept per running Vodka, so two Vodka windows can use
     /// two different accounts; the settings file only remembers which one to start with.
     pub active: std::sync::Mutex<Option<u64>>,
+    pub playtime: playtime::Store,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1117,8 +1119,15 @@ async fn luduvo_search(state: State<'_, AppState>, query: String) -> Result<Vec<
 }
 
 #[tauri::command]
-async fn luduvo_recent(state: State<'_, AppState>) -> Result<Vec<luduvo::Place>> {
-    state.luduvo.recently_played().await
+async fn luduvo_recent(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<luduvo::Place>> {
+    let list = state.luduvo.recently_played().await?;
+    // Luduvo's own playtime counts from before Vodka, so it's where each game's total starts.
+    if let Ok(dir) = config_dir(&app) {
+        let totals: Vec<_> =
+            list.iter().filter_map(|p| Some((p.id, p.title.as_str(), p.icon_url.as_deref(), p.playtime?, p.last_played))).collect();
+        state.playtime.raise_all(&dir, "luduvo", &totals);
+    }
+    Ok(list)
 }
 
 /// Hands the launcher a join link and watches the game until it closes.
@@ -1127,7 +1136,7 @@ fn run_luduvo(app: &AppHandle, state: &AppState, link: &str, place_id: u64, titl
     let mut child = luduvo::spawn(Some(link))?;
     let pid = child.id().unwrap_or_default();
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default();
-    let running = luduvo::Running { place_id, title, pid, started_at, stage: "checking".into(), done: None, total: None };
+    let running = luduvo::Running { place_id, title, pid, started_at, stage: "checking".into(), done: None, total: None, playing_since: None };
     *state.luduvo.running.lock().unwrap() = Some(running.clone());
     let _ = app.emit("luduvo://changed", ());
     let handle = app.clone();
@@ -1167,6 +1176,9 @@ fn watch_luduvo_start(app: AppHandle, pid: u32, started_at: u64) {
                 match slot.as_mut() {
                     Some(r) if r.pid == pid => {
                         let changed = r.stage != stage || r.done != done || r.total != total;
+                        if stage == "playing" && r.playing_since.is_none() {
+                            r.playing_since = Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(started_at));
+                        }
                         r.stage = stage.clone();
                         r.done = done;
                         r.total = total;
@@ -1309,6 +1321,22 @@ async fn luduvo_buy_item(state: State<'_, AppState>, item_id: u64, agreed_price:
 }
 
 #[tauri::command]
+async fn luduvo_gift_item(state: State<'_, AppState>, item_id: u64, to_user: u64, agreed_price: u64, variant: Option<u64>) -> Result<Option<i64>> {
+    state.luduvo.gift_item(item_id, to_user, agreed_price, variant).await?;
+    state.luduvo.balance().await
+}
+
+#[tauri::command]
+async fn luduvo_item_variants(state: State<'_, AppState>, item_id: u64) -> Result<Vec<luduvo::Variant>> {
+    state.luduvo.item_variants(item_id).await
+}
+
+#[tauri::command]
+async fn luduvo_answer_gift(state: State<'_, AppState>, gift_id: u64, accept: bool) -> Result<()> {
+    state.luduvo.answer_gift(gift_id, accept).await
+}
+
+#[tauri::command]
 async fn luduvo_add_friend(state: State<'_, AppState>, username: String) -> Result<()> {
     state.luduvo.add_friend(&username).await
 }
@@ -1364,6 +1392,53 @@ async fn luduvo_wear_outfit(state: State<'_, AppState>, outfit_id: u64) -> Resul
 #[tauri::command]
 async fn luduvo_save_outfit(state: State<'_, AppState>, name: String) -> Result<Vec<luduvo::Outfit>> {
     state.luduvo.save_outfit(&name).await?;
+    state.luduvo.outfits().await
+}
+
+#[tauri::command]
+async fn luduvo_conversations(state: State<'_, AppState>) -> Result<Vec<luduvo::Conversation>> {
+    state.luduvo.conversations().await
+}
+
+#[tauri::command]
+async fn luduvo_messages(state: State<'_, AppState>, conversation: u64, before_id: Option<u64>) -> Result<luduvo::MessagePage> {
+    state.luduvo.messages(conversation, before_id).await
+}
+
+#[tauri::command]
+async fn luduvo_messages_since(state: State<'_, AppState>, conversation: u64, after_id: u64) -> Result<Vec<luduvo::Message>> {
+    state.luduvo.messages_since(conversation, after_id).await
+}
+
+#[tauri::command]
+async fn luduvo_send_message(state: State<'_, AppState>, conversation: u64, body: String, reply_to: Option<u64>) -> Result<Option<luduvo::Message>> {
+    state.luduvo.send_message(conversation, &body, reply_to).await
+}
+
+#[tauri::command]
+async fn luduvo_start_chat(state: State<'_, AppState>, user_id: u64, body: String) -> Result<u64> {
+    state.luduvo.start_chat(user_id, &body).await
+}
+
+#[tauri::command]
+async fn luduvo_mark_read(state: State<'_, AppState>, conversation: u64, message_id: u64) -> Result<()> {
+    state.luduvo.mark_read(conversation, message_id).await
+}
+
+#[tauri::command]
+async fn luduvo_typing(state: State<'_, AppState>, conversation: u64) -> Result<()> {
+    state.luduvo.typing(conversation).await
+}
+
+#[tauri::command]
+async fn luduvo_rename_outfit(state: State<'_, AppState>, outfit_id: u64, name: String) -> Result<Vec<luduvo::Outfit>> {
+    state.luduvo.rename_outfit(outfit_id, &name).await?;
+    state.luduvo.outfits().await
+}
+
+#[tauri::command]
+async fn luduvo_update_outfit(state: State<'_, AppState>, outfit_id: u64) -> Result<Vec<luduvo::Outfit>> {
+    state.luduvo.update_outfit(outfit_id).await?;
     state.luduvo.outfits().await
 }
 
@@ -1441,6 +1516,34 @@ async fn luduvo_open_studio() -> Result<()> {
     luduvo::open_studio()
 }
 
+/// Every few seconds, writes down the games being played, Roblox and Luduvo, so their playtime adds up.
+fn watch_playtime(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            let Ok(dir) = config_dir(&app) else { continue };
+            let state = app.state::<AppState>();
+            let manager = state.instances.clone();
+            let roblox = tokio::task::spawn_blocking(move || instances::list(&manager)).await.unwrap_or_default();
+            let now = playtime::now_secs();
+            for i in roblox.iter().filter(|i| i.phase == "playing") {
+                let start = i.started_at_ms / 1000;
+                state.playtime.note(&dir, "roblox", i.game.universe_id, &i.game.name, i.game.icon_url.as_deref(), start, now);
+            }
+            let luduvo = state.luduvo.running.lock().unwrap().clone();
+            if let Some(r) = luduvo.filter(|r| r.stage == "playing") {
+                state.playtime.note(&dir, "luduvo", r.place_id, &r.title, None, r.playing_since.unwrap_or(r.started_at), now);
+            }
+        }
+    });
+}
+
+#[tauri::command]
+async fn playtime_list(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<playtime::Played>> {
+    let dir = config_dir(&app)?;
+    Ok(state.playtime.list(&dir, playtime::now_secs()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1450,8 +1553,14 @@ pub fn run() {
             chat: chat::Client::new(),
             instances: SharedManager::default(),
             active: std::sync::Mutex::new(None),
+            playtime: playtime::Store::default(),
+        })
+        .setup(|app| {
+            watch_playtime(app.handle().clone());
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            playtime_list,
             mocktail_status,
             begin_login,
             current_account,
@@ -1548,6 +1657,9 @@ pub fn run() {
             luduvo_rate_item,
             luduvo_favorite_item,
             luduvo_buy_item,
+            luduvo_gift_item,
+            luduvo_answer_gift,
+            luduvo_item_variants,
             luduvo_add_friend,
             luduvo_remove_friend,
             luduvo_avatar,
@@ -1557,6 +1669,15 @@ pub fn run() {
             luduvo_wear_outfit,
             luduvo_save_outfit,
             luduvo_delete_outfit,
+            luduvo_rename_outfit,
+            luduvo_conversations,
+            luduvo_messages,
+            luduvo_messages_since,
+            luduvo_send_message,
+            luduvo_start_chat,
+            luduvo_mark_read,
+            luduvo_typing,
+            luduvo_update_outfit,
             ui_log,
             luduvo_profile,
             luduvo_user_friends,

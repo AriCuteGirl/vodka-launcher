@@ -57,6 +57,19 @@ const luduvoOwned: LuduvoOwned[] = [
   owned(18, "Robot Body", "avatar_bundle", "head"),
 ];
 let luduvoWearing: LuduvoOwned[] = [luduvoOwned[0], luduvoOwned[2], luduvoOwned[5]];
+const ME_LUDUVO = 9001;
+let luduvoChats = [
+  { id: 4, kind: "direct", name: "Pixel_Pixe", peerId: 77, peerUsername: "Pixel_Pixe", unread: 1, lastMessageId: 92, lastReadId: 91, lastBody: "im finishing my flight sim rn", lastSenderId: 77, lastSentAt: Math.floor(Date.now() / 1000) - 3600 },
+  { id: 6, kind: "direct", name: "joao", peerId: 78, peerUsername: "joao", unread: 0, lastMessageId: 80, lastReadId: 80, lastBody: "Join me in Hide N Seek!", lastSenderId: 78, lastSentAt: Math.floor(Date.now() / 1000) - 3 * 3600 },
+];
+const luduvoMsgs: Record<number, { id: number; senderId: number; senderName: string; body: string; sentAt: number; replyTo: null | { id: number; senderId: number | null; senderName: string; body: string }; gift?: null | { id: number; itemId: number; itemName: string; variantName: string; pictureUrl: string | null; status: string }; kind: string }[]> = {
+  4: [
+    { id: 91, senderId: 77, senderName: "Pixel_Pixe", body: "hiiii", sentAt: Math.floor(Date.now() / 1000) - 3700, replyTo: null, kind: "" },
+    { id: 92, senderId: 77, senderName: "Pixel_Pixe", body: "im finishing my flight sim rn", sentAt: Math.floor(Date.now() / 1000) - 3600, replyTo: null, kind: "" },
+    { id: 93, senderId: 77, senderName: "Pixel_Pixe", body: "", sentAt: Math.floor(Date.now() / 1000) - 3500, replyTo: null, kind: "gift", gift: { id: 3, itemId: 1, itemName: "Winter Beanie", variantName: "", pictureUrl: null, status: "pending" } },
+  ],
+  6: [{ id: 80, senderId: 78, senderName: "joao", body: "Join me in Hide N Seek!", sentAt: Math.floor(Date.now() / 1000) - 3 * 3600, replyTo: null, kind: "" }],
+};
 let luduvoOutfits = [{ id: 40, name: "Winter", pictureUrl: null as string | null }];
 const DEMO_ITEMS: LuduvoItem[] = [
   demoItem(1, "Winter Beanie", 25, "hat"), demoItem(2, "Flag", 0, "hat"), demoItem(3, "Big Grin", 10, "face"),
@@ -749,6 +762,64 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
     case "luduvo_save_outfit":
       luduvoOutfits = [...luduvoOutfits, { id: 50 + luduvoOutfits.length, name: String(args.name), pictureUrl: null }];
       return luduvoOutfits;
+    case "luduvo_conversations":
+      await wait(200);
+      return luduvoChats;
+    case "luduvo_messages":
+      await wait(200);
+      return { messages: luduvoMsgs[args.conversation as number] ?? [], lastReadId: 0, more: false };
+    case "luduvo_messages_since":
+      return (luduvoMsgs[args.conversation as number] ?? []).filter((m) => m.id > (args.afterId as number));
+    case "luduvo_send_message": {
+      const list = (luduvoMsgs[args.conversation as number] ??= []);
+      const replied = list.find((m) => m.id === args.replyTo);
+      const m = { id: Math.max(100, ...list.map((x) => x.id)) + 1, senderId: ME_LUDUVO, senderName: "PuppyGirl", body: String(args.body), sentAt: Math.floor(Date.now() / 1000), replyTo: replied ? { id: replied.id, senderId: replied.senderId, senderName: replied.senderName, body: replied.body } : null, gift: null, kind: "" };
+      list.push(m);
+      luduvoChats = luduvoChats.map((c) => (c.id === args.conversation ? { ...c, lastBody: m.body, lastSenderId: ME_LUDUVO, lastSentAt: m.sentAt, lastMessageId: m.id } : c));
+      return m;
+    }
+    case "luduvo_start_chat": {
+      const id = 50 + luduvoChats.length;
+      luduvoMsgs[id] = [{ id: 1, senderId: ME_LUDUVO, senderName: "PuppyGirl", body: String(args.body), sentAt: Math.floor(Date.now() / 1000), replyTo: null, kind: "" }];
+      luduvoChats = [{ id, kind: "direct", name: `Friend ${args.userId}`, peerId: args.userId as number, peerUsername: "", unread: 0, lastMessageId: 1, lastReadId: 1, lastBody: String(args.body), lastSenderId: ME_LUDUVO, lastSentAt: Math.floor(Date.now() / 1000) }, ...luduvoChats];
+      return id;
+    }
+    case "luduvo_mark_read":
+      luduvoChats = luduvoChats.map((c) => (c.id === args.conversation ? { ...c, unread: 0, lastReadId: args.messageId as number } : c));
+      return null;
+    case "luduvo_gift_item": {
+      await wait(400);
+      const it = DEMO_ITEMS.find((i) => i.id === args.itemId);
+      if (!it || it.price == null || (args.variant == null && it.price !== args.agreedPrice)) throw { kind: "other", message: "The price changed since you looked. Check it and confirm again." };
+      if (it.price > luduvoCoins) throw { kind: "other", message: "Luduvo: You don't have enough Lunes." };
+      luduvoCoins -= it.price;
+      const chat = luduvoChats.find((c) => c.peerId === args.toUser);
+      if (chat) {
+        const list = (luduvoMsgs[chat.id] ??= []);
+        list.push({ id: Math.max(100, ...list.map((x) => x.id)) + 1, senderId: ME_LUDUVO, senderName: "PuppyGirl", body: "", sentAt: Math.floor(Date.now() / 1000), replyTo: null, kind: "gift", gift: { id: 9, itemId: it.id, itemName: it.name, variantName: "", pictureUrl: null, status: "pending" } });
+      }
+      return luduvoCoins;
+    }
+    case "luduvo_item_variants":
+      await wait(150);
+      return args.itemId === 1
+        ? [
+            { index: 1, onSale: true, price: 25, name: "Red", color: "#A11F1F", pictureUrl: null },
+            { index: 2, onSale: true, price: 30, name: "Blue", color: "#3B6FD8", pictureUrl: null },
+          ]
+        : [];
+    case "luduvo_answer_gift":
+      await wait(300);
+      for (const list of Object.values(luduvoMsgs)) for (const m of list) if (m.gift && m.gift.id === args.giftId) m.gift.status = args.accept ? "accepted" : "rejected";
+      return null;
+    case "luduvo_typing":
+      return null;
+    case "luduvo_rename_outfit":
+      luduvoOutfits = luduvoOutfits.map((o) => (o.id === args.outfitId ? { ...o, name: String(args.name) } : o));
+      return luduvoOutfits;
+    case "luduvo_update_outfit":
+      await wait(300);
+      return luduvoOutfits;
     case "luduvo_delete_outfit":
       luduvoOutfits = luduvoOutfits.filter((o) => o.id !== args.outfitId);
       return luduvoOutfits;
@@ -774,6 +845,14 @@ export async function demoInvoke(cmd: string, args: Record<string, unknown> = {}
       await wait(700);
       luduvoRunning = { placeId: (args.placeId as number) ?? 0, title: String(args.title), pid: 4243, startedAt: Math.floor(Date.now() / 1000), stage: "playing", done: null, total: null };
       return luduvoRunning;
+    case "playtime_list": {
+      const now = Math.floor(Date.now() / 1000);
+      return [
+        { game: "luduvo", id: 7, title: "Fish.io [UPDATE]", iconUrl: null, totalSecs: 13_260, twoWeeksSecs: 5_400, lastPlayed: now - 3_600, sessions: 6 },
+        { game: "roblox", id: 6035872082, title: "RIVALS", iconUrl: null, totalSecs: 98_000, twoWeeksSecs: 7_300, lastPlayed: now - 90_000, sessions: 12 },
+        { game: "roblox", id: 383310974, title: "Adopt Me!", iconUrl: null, totalSecs: 2_400, twoWeeksSecs: 0, lastPlayed: now - 40 * 86_400, sessions: 2 },
+      ];
+    }
     case "luduvo_balance":
       return luduvoCoins;
     case "luduvo_running":

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.1 (2026-11-17)
+
+Gifts in Luduvo Messages, and notifications that show above pop-ups.
+
+- Messages at the bottom of the window ("Sent…", errors) now show on top of an open pop-up instead of behind its blur, everywhere in Vodka.
+- Luduvo Messages: send a gift from the gift button next to Send. Pick a store item, see the price and your Lunes, confirm, and it arrives in the chat. Gifts you get show as a card with Accept and Decline. Like on luduvo.com, free and limited items can't be gifted, and items that come in colours let you pick one (at that colour's price).
+- Luduvo's "untrusted account" refusal (gifts and other actions need an account at least 24 hours old with a verified email) is explained in full.
+- Luduvo errors that come as a short code are shown as words instead of "a response Vodka didn't understand".
+- Luduvo Messages: the page fits the window, so there's no extra scrollbar on the right.
+
+## 0.4.0 (2026-11-17)
+
+Luduvo Messages, playtime tracking, and a friends panel you can hide.
+
+- The friends panel on the right can be hidden with the small arrow at its top left and brought back the same way, for Roblox and Luduvo. Vodka remembers which way you left it.
+- Luduvo Messages, laid out like luduvo.com: your chats with search and unread counts on the left, the conversation on the right with day lines, replies, and new messages showing up within a few seconds. Start a chat with + or the Message button on a friend's profile. The sidebar shows how many chats are unread.
+- Luduvo Avatar: each outfit has a ⋮ menu with Rename (right on the card), Update (replace it with what you're wearing now) and Delete, the last two after a confirmation.
+- Playtime, like Steam: Vodka counts how long you play each Roblox and Luduvo game you start from it. Each game's page shows the hours on record, the past two weeks and when you last played, and a new Playtime page (in each game's sidebar) lists them all, by recent or most played. Luduvo games start from Luduvo's own count, so time played before Vodka is included.
+
 ## 0.3.0 (2026-11-17)
 
 Friend pop-ups, Roblox profiles, and Luduvo's Marketplace, Friends, Avatar and profiles inside Vodka.

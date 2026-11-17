@@ -23,6 +23,7 @@ export const GAMES: GameSection[] = [
       { href: "/marketplace", label: "Marketplace", icon: "market" },
       { href: "/friends", label: "Friends", icon: "friends" },
       { href: "/chat", label: "Chat", icon: "chat" },
+      { href: "/playtime", label: "Playtime", icon: "clock" },
     ],
   },
   {
@@ -35,6 +36,8 @@ export const GAMES: GameSection[] = [
       { href: "/luduvo/avatar", label: "Avatar", icon: "avatar" },
       { href: "/luduvo/marketplace", label: "Marketplace", icon: "market" },
       { href: "/luduvo/friends", label: "Friends", icon: "friends" },
+      { href: "/luduvo/messages", label: "Messages", icon: "chat" },
+      { href: "/luduvo/playtime", label: "Playtime", icon: "clock" },
     ],
   },
 ];

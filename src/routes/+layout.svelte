@@ -39,6 +39,17 @@
   });
 
   const game = $derived(gameOf(page.url.pathname));
+
+  // The friends panel on the right can be put away and pulled back, like the sidebar; remembered between starts.
+  let railOpen = $state(typeof localStorage === "undefined" || localStorage.getItem("vodka-right-rail") !== "closed");
+  function toggleRail() {
+    railOpen = !railOpen;
+    try {
+      localStorage.setItem("vodka-right-rail", railOpen ? "open" : "closed");
+    } catch {
+      // It just won't be remembered.
+    }
+  }
   // The accent colour follows the game; dialogs and toasts live outside the shell, so it goes on the root.
   $effect(() => {
     document.documentElement.dataset.game = game.id;
@@ -76,7 +87,20 @@
         {/if}
         <div class="body">
           <main>{@render children()}</main>
-          {#if game.id === "roblox"}<RightRail />{:else}<LuduvoRail />{/if}
+          <div class="side" class:closed={!railOpen}>
+            <button
+              class="rail-toggle"
+              onclick={toggleRail}
+              aria-expanded={railOpen}
+              aria-label={railOpen ? "Hide the friends panel" : "Show the friends panel"}
+              title={railOpen ? "Hide friends" : "Show friends"}
+            >
+              <Icon name={railOpen ? "forward" : "back"} size={15} />
+            </button>
+            {#if railOpen}
+              {#if game.id === "roblox"}<RightRail />{:else}<LuduvoRail />{/if}
+            {/if}
+          </div>
         </div>
       </div>
     </div>
@@ -241,6 +265,39 @@
     min-width: 0;
     padding: var(--s-4) 0 var(--s-6) var(--s-4);
     overflow-y: auto;
+  }
+  .side {
+    position: relative;
+    display: flex;
+  }
+  .side.closed {
+    width: 22px;
+  }
+  .rail-toggle {
+    position: absolute;
+    top: var(--s-4);
+    left: -14px;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid var(--line-strong);
+    background: var(--bg-1);
+    color: var(--text-1);
+    box-shadow: var(--shadow-1);
+    cursor: pointer;
+    opacity: 0.75;
+    transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
+  }
+  .side.closed .rail-toggle {
+    left: -8px;
+  }
+  .rail-toggle:hover,
+  .rail-toggle:focus-visible {
+    opacity: 1;
+    color: var(--frost);
   }
   .crashlog {
     margin: var(--s-3) 0;

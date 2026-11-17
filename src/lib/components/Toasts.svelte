@@ -1,9 +1,25 @@
 <script lang="ts">
   import { app, dismissToast } from "$lib/state.svelte";
   import Icon from "./Icon.svelte";
+
+  // Pop-ups (dialogs) sit in the browser's top layer, above anything else. The toasts go there too, as a popover,
+  // and are raised again whenever one appears, so a message from inside a pop-up shows on top of it, not behind.
+  let box = $state<HTMLDivElement | null>(null);
+  const canPop = typeof HTMLElement !== "undefined" && "showPopover" in HTMLElement.prototype;
+  $effect(() => {
+    const count = app.toasts.length;
+    void app.toasts.map((t) => t.id);
+    if (!box || !canPop) return;
+    try {
+      if (box.matches(":popover-open")) box.hidePopover();
+      if (count > 0) box.showPopover();
+    } catch {
+      // Older engines: the toasts stay a normal layer.
+    }
+  });
 </script>
 
-<div class="toasts" aria-live="polite">
+<div class="toasts" aria-live="polite" bind:this={box} popover={canPop ? "manual" : undefined}>
   {#each app.toasts as t (t.id)}
     <div class="toast {t.tone}" role={t.tone === "danger" ? "alert" : "status"}>
       <Icon name={t.tone === "ok" ? "check" : t.tone === "danger" ? "alert" : "bottle"} size={18} />
@@ -15,6 +31,13 @@
 
 <style>
   .toasts {
+    /* The popover defaults (centred, bordered box) are undone so it stays a strip at the bottom. */
+    inset: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    overflow: visible;
     position: fixed;
     left: 50%;
     bottom: var(--s-5);

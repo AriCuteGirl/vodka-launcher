@@ -2,6 +2,7 @@
   import { api } from "$lib/api";
   import Button from "$lib/components/Button.svelte";
   import Icon from "$lib/components/Icon.svelte";
+  import Modal from "$lib/components/Modal.svelte";
   import Skeleton from "$lib/components/Skeleton.svelte";
   import StateCard from "$lib/components/StateCard.svelte";
   import { luduvo, luduvoSignIn, startLuduvo } from "$lib/luduvo.svelte";
@@ -52,15 +53,16 @@
   let brokenPictures = $state(new Set<number>());
 
   /** Luduvo draws a new outfit's picture a few seconds after it's saved; look again until it's there. */
-  async function waitForPictures() {
-    for (const ms of [1500, 3000, 5000]) {
+  async function waitForPictures(changed: number | null = null, before: string | null = null) {
+    for (const ms of [1500, 3000, 5000, 8000]) {
       await new Promise((r) => setTimeout(r, ms));
       try {
         outfits = await api.luduvoOutfits();
       } catch {
         return;
       }
-      if (outfits.every((o) => o.pictureUrl)) return;
+      const done = changed == null ? outfits.every((o) => o.pictureUrl) : outfits.find((o) => o.id === changed)?.pictureUrl !== before;
+      if (done) return;
     }
   }
 
@@ -164,15 +166,68 @@
       toast(toAppError(err).message, "danger");
     }
   }
-  async function deleteOutfit(o: LuduvoOutfit) {
+  // The ⋮ menu on each outfit: rename it in place, update it to what you wear now, or delete it.
+  let menuFor = $state<number | null>(null);
+  let renaming = $state<number | null>(null);
+  let renameText = $state("");
+  let confirming = $state<{ kind: "update" | "delete"; outfit: LuduvoOutfit } | null>(null);
+  let busyOutfit = $state(false);
+
+  function startRename(o: LuduvoOutfit) {
+    menuFor = null;
+    renaming = o.id;
+    renameText = o.name;
+  }
+  async function rename(e: SubmitEvent, o: LuduvoOutfit) {
+    e.preventDefault();
+    const name = renameText.trim();
+    if (!name || name === o.name) return void (renaming = null);
     try {
-      outfits = await api.luduvoDeleteOutfit(o.id);
-      toast(`Deleted ${o.name}.`, "ok");
+      outfits = await api.luduvoRenameOutfit(o.id, name);
+      toast(`Renamed to ${name}.`, "ok");
+      renaming = null;
     } catch (err) {
       toast(toAppError(err).message, "danger");
     }
   }
+  async function confirmed() {
+    if (!confirming) return;
+    const { kind, outfit: o } = confirming;
+    busyOutfit = true;
+    try {
+      if (kind === "update") {
+        outfits = await api.luduvoUpdateOutfit(o.id);
+        brokenPictures = new Set([...brokenPictures].filter((id) => id !== o.id));
+        toast(`${o.name} now matches what you're wearing.`, "ok");
+        void waitForPictures(o.id, o.pictureUrl);
+      } else {
+        outfits = await api.luduvoDeleteOutfit(o.id);
+        if (wornOutfit === o.id) wornOutfit = null;
+        toast(`Deleted ${o.name}.`, "ok");
+      }
+      confirming = null;
+    } catch (err) {
+      toast(toAppError(err).message, "danger");
+    }
+    busyOutfit = false;
+  }
 </script>
+
+<svelte:window onclick={(e) => menuFor != null && !(e.target as Element).closest?.(".dots, .menu") && (menuFor = null)} />
+
+{#if confirming}
+  <Modal title={confirming.kind === "update" ? `Update ${confirming.outfit.name}?` : `Delete ${confirming.outfit.name}?`} onclose={() => (confirming = null)}>
+    {#if confirming.kind === "update"}
+      <p>This replaces the outfit with what you're wearing now. Its old look can't be brought back.</p>
+    {:else}
+      <p>This deletes the outfit. The items in it stay in your inventory.</p>
+    {/if}
+    {#snippet actions()}
+      <Button onclick={() => (confirming = null)}>Cancel</Button>
+      <Button variant={confirming?.kind === "delete" ? "danger" : "primary"} busy={busyOutfit} onclick={confirmed}>{confirming?.kind === "update" ? "Update" : "Delete"}</Button>
+    {/snippet}
+  </Modal>
+{/if}
 
 <div class="avatar">
   <h1>Avatar</h1>
@@ -251,9 +306,31 @@
                     {/if}
                     {#if wornOutfit === o.id}<span class="tick"><Icon name="check" size={14} /></span>{/if}
                   </span>
-                  <span class="nm">{o.name}</span>
+                  {#if renaming !== o.id}<span class="nm">{o.name}</span>{/if}
                 </button>
-                <button class="del" onclick={() => deleteOutfit(o)} aria-label="Delete {o.name}" title="Delete {o.name}"><Icon name="close" size={13} /></button>
+                {#if renaming === o.id}
+                  <form class="rename" onsubmit={(e) => rename(e, o)}>
+                    <!-- svelte-ignore a11y_autofocus -->
+                    <input
+                      bind:value={renameText}
+                      maxlength="50"
+                      spellcheck="false"
+                      autocomplete="off"
+                      aria-label="New name for {o.name}"
+                      autofocus
+                      onkeydown={(e) => e.key === "Escape" && (renaming = null)}
+                      onblur={(e) => (e.currentTarget.form?.requestSubmit())}
+                    />
+                  </form>
+                {/if}
+                <button class="dots" class:open={menuFor === o.id} onclick={() => (menuFor = menuFor === o.id ? null : o.id)} aria-label="More for {o.name}" aria-haspopup="menu" aria-expanded={menuFor === o.id}><Icon name="moreV" size={16} /></button>
+                {#if menuFor === o.id}
+                  <div class="menu" role="menu">
+                    <button role="menuitem" onclick={() => startRename(o)}><Icon name="edit" size={15} />Rename</button>
+                    <button role="menuitem" onclick={() => ((menuFor = null), (confirming = { kind: "update", outfit: o }))}><Icon name="refresh" size={15} />Update</button>
+                    <button role="menuitem" class="danger" onclick={() => ((menuFor = null), (confirming = { kind: "delete", outfit: o }))}><Icon name="trash" size={15} />Delete</button>
+                  </div>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -406,8 +483,7 @@
     color: var(--text-2);
     padding-right: 4px;
   }
-  .worn button,
-  .del {
+  .worn button {
     display: grid;
     place-items: center;
     width: 24px;
@@ -418,8 +494,7 @@
     color: var(--text-2);
     cursor: pointer;
   }
-  .worn button:hover,
-  .del:hover {
+  .worn button:hover {
     color: var(--danger);
     background: var(--glass-hover);
   }
@@ -436,7 +511,7 @@
     margin: 0;
     padding: 0 0 var(--s-2);
     list-style: none;
-    overflow-x: auto;
+    flex-wrap: wrap;
   }
   .outfits li {
     position: relative;
@@ -485,17 +560,70 @@
     font-size: var(--fs-sm);
     font-weight: 600;
   }
-  .outfits .del {
+  .dots {
     position: absolute;
     top: 6px;
-    left: 6px;
+    right: 6px;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: 0;
+    border-radius: 8px;
     background: rgba(0, 0, 0, 0.55);
+    color: var(--text-0);
+    cursor: pointer;
     opacity: 0;
     transition: opacity var(--fast) var(--ease);
   }
-  .outfits li:hover .del,
-  .outfits .del:focus-visible {
+  .outfits li:hover .dots,
+  .dots:focus-visible,
+  .dots.open {
     opacity: 1;
+  }
+  .menu {
+    position: absolute;
+    top: 36px;
+    left: 6px;
+    z-index: 5;
+    display: grid;
+    min-width: 140px;
+    padding: 4px;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line-strong);
+    background: #141b24;
+    box-shadow: var(--shadow-2);
+  }
+  .menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-0);
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .menu button:hover {
+    background: var(--glass-hover);
+  }
+  .menu .danger {
+    color: var(--danger);
+  }
+  .rename input {
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--frost);
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--text-0);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    user-select: text;
   }
   .save {
     display: flex;

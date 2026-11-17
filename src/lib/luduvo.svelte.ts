@@ -1,6 +1,8 @@
 // Luduvo's part of Vodka: its own account, game lists and Play, separate from Roblox's state.
 import { api } from "./api";
 import { noteFriends } from "./alerts.svelte";
+import { loadPlaytime } from "./playtime.svelte";
+import { stopChats, watchChats } from "./luduvo-chat.svelte";
 import { toast } from "./state.svelte";
 import { toAppError, type Loadable, type LuduvoFriend, type LuduvoPlace, type LuduvoRunning, type LuduvoShelf, type LuduvoStatus, type LuduvoUser } from "./types";
 
@@ -76,6 +78,8 @@ export function loadRecent() {
   luduvo.recent = { status: "loading" };
   return load((v) => {
     luduvo.recent = v;
+    // Reading the list also takes Luduvo's own playtime into Vodka's.
+    if (v.status === "ready") void loadPlaytime();
   }, api.luduvoRecent);
 }
 
@@ -110,6 +114,7 @@ export async function startLuduvo() {
   void loadRecent();
   void loadBalance(true);
   void loadSocial();
+  if (luduvo.user) watchChats();
   // Lunes change when you buy on the website or get a subscription's daily Lunes: read them again when you come back
   // to Vodka, and every half minute while it's in front.
   window.addEventListener("focus", () => void loadBalance());
@@ -133,6 +138,7 @@ export async function luduvoSignIn() {
     toast(`Signed in to Luduvo as ${luduvo.user.displayName}.`, "ok");
     void loadRecent();
     void loadSocial();
+    watchChats();
   } catch (e) {
     const err = toAppError(e);
     if (err.message !== "Sign-in cancelled.") toast(err.message, "danger");
@@ -153,6 +159,7 @@ export async function luduvoSignOut() {
     luduvo.friends = { status: "loading" };
     luduvo.requests = [];
     luduvo.coins = null;
+    stopChats();
     toast("Signed out of Luduvo.", "ok");
   } catch (e) {
     toast(toAppError(e).message, "danger");

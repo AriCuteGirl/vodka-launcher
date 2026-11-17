@@ -8,7 +8,7 @@
 pub mod parse;
 
 use crate::error::{AppError, Result};
-pub use parse::{Friend, Group, OwnedItem, Outfit, Profile, Place, PlaceDetails, Rating, Server, Shelf, StoreCategory, StoreItem, User};
+pub use parse::{Variant, Conversation, Message, MessagePage, Friend, Group, OwnedItem, Outfit, Profile, Place, PlaceDetails, Rating, Server, Shelf, StoreCategory, StoreItem, User};
 use reqwest::{Method, StatusCode, Url, header};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -89,6 +89,8 @@ pub struct Running {
     /// Content downloaded so far, out of `total`, while `stage` is `content`.
     pub done: Option<u64>,
     pub total: Option<u64>,
+    /// Unix seconds when the game itself opened (after any update or download).
+    pub playing_since: Option<u64>,
 }
 
 /// Whether the launcher Vodka started has turned into the game itself (it replaces itself with `LuduvoGame`).
@@ -225,6 +227,11 @@ fn explain(status: StatusCode, body: &str) -> AppError {
     let known = match code {
         "join_flood" => Some("You're joining games too quickly. Wait a few minutes and try again."),
         "paid_access_required" => Some("This game needs paid access. Buy it on luduvo.com first."),
+        // Luduvo's own wording for these, from its website.
+        "untrusted_account" => Some(
+            "Luduvo only allows this for accounts that are at least 24 hours old and have a verified email. Verify your email on luduvo.com (Settings), then try again.",
+        ),
+        "abuse_cooldown" => Some("Luduvo has temporarily blocked this account, device or network for suspicious activity. Try again later."),
         _ => None,
     };
     if let Some(text) = known {
@@ -234,11 +241,27 @@ fn explain(status: StatusCode, body: &str) -> AppError {
         return AppError::Other("This game needs paid access. Buy it on luduvo.com first.".into());
     }
     // Luduvo's own messages are short sentences meant for players; show them, but never a whole page of HTML.
-    let message = json.get("message").or_else(|| json.get("error")).and_then(|v| v.as_str()).filter(|m| m.contains(' ') && m.len() < 200);
-    match message {
-        Some(m) => AppError::Other(format!("Luduvo: {m}")),
-        None => AppError::Other(format!("Luduvo sent a response Vodka didn't understand (HTTP {}).", status.as_u16())),
+    let message = ["message", "error", "detail"]
+        .iter()
+        .find_map(|k| json.get(*k).and_then(|v| v.as_str()))
+        .filter(|m| m.contains(' ') && m.len() < 200);
+    if let Some(m) = message {
+        return AppError::Other(format!("Luduvo: {m}"));
     }
+    // A bare code such as `gift_not_allowed`: still better than nothing, read out as words.
+    let code = ["code", "error"].iter().find_map(|k| json.get(*k).and_then(|v| v.as_str())).filter(|c| {
+        (3..60).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit())
+    });
+    if let Some(c) = code {
+        let words = c.replace('_', " ");
+        let mut chars = words.chars();
+        let words = chars.next().map(|f| f.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
+        return AppError::Other(format!("Luduvo: {words} (HTTP {}).", status.as_u16()));
+    }
+    if status == StatusCode::FORBIDDEN {
+        return AppError::Other("Luduvo refused that (HTTP 403). It may need a captcha or not be allowed for this account; try it on luduvo.com.".into());
+    }
+    AppError::Other(format!("Luduvo sent a response Vodka didn't understand (HTTP {}).", status.as_u16()))
 }
 
 pub struct Client {
@@ -529,6 +552,41 @@ impl Client {
         }
     }
 
+    /// Buys `id` for someone else at the price you agreed to; it arrives in your chat with them as a gift.
+    pub async fn gift_item(&self, id: u64, to_user: u64, agreed_price: u64, variant: Option<u64>) -> Result<()> {
+        let item = self.store_item(id).await?;
+        // A colour can have its own price; that's the one Luduvo charges.
+        let price = match variant {
+            Some(v) => self.item_variants(id).await?.into_iter().find(|x| x.index == v).and_then(|x| x.price).or(item.price),
+            None => item.price,
+        };
+        if price != Some(agreed_price) {
+            return Err(AppError::Other("The price changed since you looked. Check it and confirm again.".into()));
+        }
+        if agreed_price == 0 {
+            return Err(AppError::Other("Free items can't be gifted.".into()));
+        }
+        self.authed_with(
+            Method::POST,
+            &format!("/store/{id}/gift"),
+            Some(&serde_json::json!({ "expected_price": agreed_price, "to_user": to_user, "variant_index": variant })),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// An item's colours that can be bought or gifted now.
+    pub async fn item_variants(&self, id: u64) -> Result<Vec<parse::Variant>> {
+        let json = self.public(&format!("/items/{id}/variants")).await?;
+        Ok(parse::variants(&json))
+    }
+
+    /// Accepts or declines a gift someone sent you.
+    pub async fn answer_gift(&self, gift_id: u64, accept: bool) -> Result<()> {
+        self.authed(Method::POST, &format!("/gifts/{gift_id}/{}", if accept { "accept" } else { "reject" })).await?;
+        Ok(())
+    }
+
     /// A full-body picture of someone's avatar. Luduvo answers with a redirect to the picture on its asset host.
     pub async fn avatar_picture(&self, user_id: u64) -> Result<Option<String>> {
         let url = Url::parse(&format!("{API}/users/{user_id}/avatar/full-body")).expect("static url");
@@ -665,6 +723,21 @@ impl Client {
         Ok(())
     }
 
+    pub async fn rename_outfit(&self, id: u64, name: &str) -> Result<()> {
+        let name: String = name.trim().chars().take(50).collect();
+        if name.is_empty() {
+            return Err(AppError::Other("Give the outfit a name first.".into()));
+        }
+        self.authed_with(Method::PUT, &format!("/me/outfits/{id}"), Some(&serde_json::json!({ "name": name }))).await?;
+        Ok(())
+    }
+
+    /// Replaces an outfit with what you're wearing now.
+    pub async fn update_outfit(&self, id: u64) -> Result<()> {
+        self.authed_with(Method::POST, &format!("/me/outfits/{id}/update"), Some(&serde_json::json!({}))).await?;
+        Ok(())
+    }
+
     pub async fn delete_outfit(&self, id: u64) -> Result<()> {
         self.authed(Method::DELETE, &format!("/me/outfits/{id}")).await?;
         Ok(())
@@ -736,6 +809,63 @@ impl Client {
         #[cfg(debug_assertions)]
         eprintln!("[luduvo] pending shape: {}", parse::shape(&json));
         Ok(parse::friend_list(&json))
+    }
+
+    /// Your chats, most recent first.
+    pub async fn conversations(&self) -> Result<Vec<Conversation>> {
+        let json = self.authed(Method::GET, "/me/conversations?limit=100&offset=0").await?;
+        #[cfg(debug_assertions)]
+        eprintln!("[luduvo] conversations shape: {}", parse::shape(&json));
+        Ok(parse::conversations(&json))
+    }
+
+    /// The latest messages in a chat, or the ones before `before_id`.
+    pub async fn messages(&self, conversation: u64, before_id: Option<u64>) -> Result<MessagePage> {
+        const PAGE: usize = 50;
+        let before = before_id.map(|id| format!("&before_id={id}")).unwrap_or_default();
+        let json = self.authed(Method::GET, &format!("/conversations/{conversation}/messages?limit={PAGE}{before}")).await?;
+        #[cfg(debug_assertions)]
+        eprintln!("[luduvo] messages shape: {}", parse::shape(&json));
+        Ok(parse::message_page(&json, PAGE))
+    }
+
+    /// Messages newer than `after_id`, oldest first.
+    pub async fn messages_since(&self, conversation: u64, after_id: u64) -> Result<Vec<Message>> {
+        let json = self.authed(Method::GET, &format!("/conversations/{conversation}/messages/since?message_id={after_id}&limit=50")).await?;
+        Ok(parse::message_page(&json, 50).messages)
+    }
+
+    /// Sends a message, as a reply when `reply_to` is set. Returns it when Luduvo sends it back.
+    pub async fn send_message(&self, conversation: u64, body: &str, reply_to: Option<u64>) -> Result<Option<Message>> {
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(AppError::Other("Type a message first.".into()));
+        }
+        let json = self
+            .authed_with(Method::POST, &format!("/conversations/{conversation}/messages"), Some(&serde_json::json!({ "body": body, "reply_to_message_id": reply_to })))
+            .await?;
+        Ok(parse::message(json.get("message").unwrap_or(&json)))
+    }
+
+    /// Starts a direct chat with someone (Luduvo makes it with the first message). Returns the chat's id.
+    pub async fn start_chat(&self, user_id: u64, body: &str) -> Result<u64> {
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(AppError::Other("Type a message first.".into()));
+        }
+        let json = self.authed_with(Method::POST, "/conversations", Some(&serde_json::json!({ "kind": "direct", "user_id": user_id, "body": body }))).await?;
+        json.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| AppError::Api("Luduvo didn't say which chat it made.".into()))
+    }
+
+    pub async fn mark_read(&self, conversation: u64, message_id: u64) -> Result<()> {
+        self.authed_with(Method::POST, &format!("/conversations/{conversation}/read"), Some(&serde_json::json!({ "message_id": message_id }))).await?;
+        Ok(())
+    }
+
+    /// Tells the other side you're typing.
+    pub async fn typing(&self, conversation: u64) -> Result<()> {
+        self.authed(Method::POST, &format!("/conversations/{conversation}/typing")).await?;
+        Ok(())
     }
 
     /// Accepts a request, or declines it the way the website does (by deleting it).
@@ -990,6 +1120,12 @@ mod tests {
         assert!(e.to_string().contains("too quickly"));
         let e = explain(StatusCode::BAD_REQUEST, "<html>nope</html>");
         assert!(e.to_string().contains("HTTP 400"));
+        let e = explain(StatusCode::FORBIDDEN, r#"{"error":"untrusted_account"}"#);
+        assert!(e.to_string().contains("verified email"));
+        let e = explain(StatusCode::FORBIDDEN, r#"{"error":"gift_not_allowed"}"#);
+        assert_eq!(e.to_string(), "Luduvo: Gift not allowed (HTTP 403).");
+        let e = explain(StatusCode::FORBIDDEN, r#"{"error":"You can only gift friends."}"#);
+        assert_eq!(e.to_string(), "Luduvo: You can only gift friends.");
     }
 }
 

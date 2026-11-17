@@ -3,6 +3,7 @@
   import { api } from "$lib/api";
   import Button from "$lib/components/Button.svelte";
   import GamePage from "$lib/components/GamePage.svelte";
+  import { loadPlaytime, playedOf } from "$lib/playtime.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import PrivateServers from "$lib/components/PrivateServers.svelte";
@@ -127,6 +128,9 @@
     if (d.updated) out.push({ label: "Updated", value: new Date(d.updated).toLocaleDateString() });
     return out;
   });
+  $effect(() => {
+    void loadPlaytime();
+  });
 </script>
 
 {#if details.status === "error"}
@@ -138,6 +142,7 @@
   </div>
 {:else}
   <GamePage
+    played={playedOf("roblox", universeId)}
     title={d?.name ?? "Loading…"}
     banner={d?.bannerUrl}
     icon={d?.iconUrl}

@@ -3,6 +3,7 @@
   import { api } from "$lib/api";
   import Button from "$lib/components/Button.svelte";
   import GamePage from "$lib/components/GamePage.svelte";
+  import { loadPlaytime, playedOf } from "$lib/playtime.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import ServerBrowser, { type BrowserServer } from "$lib/components/ServerBrowser.svelte";
@@ -117,6 +118,9 @@
     }
     joiningGroup = false;
   }
+  $effect(() => {
+    void loadPlaytime();
+  });
 </script>
 
 {#if details.status === "error"}
@@ -128,6 +132,7 @@
   </div>
 {:else}
   <GamePage
+    played={playedOf("luduvo", placeId)}
     title={p?.title ?? "Loading…"}
     banner={p?.bannerUrl}
     icon={p?.iconUrl}

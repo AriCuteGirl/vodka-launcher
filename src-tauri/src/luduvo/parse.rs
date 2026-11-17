@@ -23,6 +23,8 @@ pub struct Place {
     pub dislikes: u64,
     /// Your total time in this game, in seconds; only recently-played lists have it.
     pub playtime: Option<u64>,
+    /// Unix seconds you last played it; only recently-played lists have it.
+    pub last_played: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -84,6 +86,7 @@ pub fn place(v: &Value) -> Option<Place> {
         likes: num(v, "thumbs_up"),
         dislikes: num(v, "thumbs_down"),
         playtime: v.get("playtime_seconds").and_then(Value::as_u64),
+        last_played: v.get("last_played_at").and_then(Value::as_u64),
     })
 }
 
@@ -391,9 +394,14 @@ pub fn owned_list(v: &Value) -> Vec<OwnedItem> {
 }
 
 /// One colour of an item, from `/items/{id}/variants`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Variant {
     pub index: u64,
+    /// Can be bought or gifted now.
+    pub on_sale: bool,
+    /// Its own price in Lunes, when it has one.
+    pub price: Option<u64>,
     pub name: String,
     /// `#RRGGBB`, only when it is one.
     pub color: Option<String>,
@@ -412,6 +420,8 @@ pub fn variants(v: &Value) -> Vec<Variant> {
                 .filter_map(|x| {
                     Some(Variant {
                         index: x.get("variant_index")?.as_u64()?,
+                        on_sale: x.get("is_on_sale").and_then(Value::as_bool).unwrap_or(true),
+                        price: x.get("price").and_then(Value::as_u64),
                         name: text(x, "name"),
                         color: x
                             .get("hex_code")
@@ -709,6 +719,168 @@ pub fn tokens(body: &str) -> Option<(String, String)> {
     (!access.is_empty() && !refresh.is_empty()).then_some((access, refresh))
 }
 
+/// One chat in your Messages list.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Conversation {
+    pub id: u64,
+    /// "direct" or "group".
+    pub kind: String,
+    /// What to call it: the group's title, or the other person's display name.
+    pub name: String,
+    /// The other person in a direct chat.
+    pub peer_id: Option<u64>,
+    pub peer_username: String,
+    pub unread: u64,
+    pub last_message_id: Option<u64>,
+    pub last_read_id: u64,
+    pub last_body: String,
+    pub last_sender_id: Option<u64>,
+    /// Unix seconds.
+    pub last_sent_at: Option<u64>,
+}
+
+pub fn conversations(v: &Value) -> Vec<Conversation> {
+    let list = v.get("conversations").or_else(|| v.get("items")).and_then(Value::as_array).or_else(|| v.as_array());
+    list.into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let id = c.get("id")?.as_u64()?;
+            let kind = Some(text(c, "kind")).filter(|k| !k.is_empty()).unwrap_or_else(|| "direct".into());
+            let title = text(c, "title");
+            let display = text(c, "peer_display_name");
+            let username = text(c, "peer_username");
+            let name = [title.trim(), display.trim()].into_iter().find(|n| !n.is_empty()).map(str::to_owned).unwrap_or_else(|| {
+                if !username.is_empty() {
+                    format!("@{username}")
+                } else if kind == "direct" {
+                    "Direct message".into()
+                } else {
+                    "Group chat".into()
+                }
+            });
+            Some(Conversation {
+                id,
+                name,
+                peer_id: c.get("peer_user_id").and_then(Value::as_u64).filter(|id| *id > 0),
+                peer_username: username,
+                unread: c.get("unread_count").and_then(Value::as_u64).unwrap_or(0),
+                last_message_id: c.get("last_message_id").and_then(Value::as_u64),
+                last_read_id: c.get("last_read_message_id").and_then(Value::as_u64).unwrap_or(0),
+                last_body: text(c, "last_message_body"),
+                last_sender_id: c.get("last_message_sender_id").and_then(Value::as_u64),
+                last_sent_at: c.get("last_message_sent_at").and_then(unix_secs),
+                kind,
+            })
+        })
+        .collect()
+}
+
+/// A time as Unix seconds, whether Luduvo sent seconds or milliseconds.
+fn unix_secs(v: &Value) -> Option<u64> {
+    let n = v.as_u64()?;
+    Some(if n > 100_000_000_000 { n / 1000 } else { n })
+}
+
+/// The message another one replies to, as much as Luduvo sends of it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyTo {
+    pub id: u64,
+    pub sender_id: Option<u64>,
+    pub sender_name: String,
+    pub body: String,
+}
+
+/// A gift sent in a chat.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Gift {
+    pub id: u64,
+    pub item_id: u64,
+    pub item_name: String,
+    pub variant_name: String,
+    pub picture_url: Option<String>,
+    /// "pending", "accepted" or "rejected".
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Message {
+    pub id: u64,
+    pub sender_id: u64,
+    pub sender_name: String,
+    pub body: String,
+    /// Unix seconds.
+    pub sent_at: u64,
+    pub reply_to: Option<ReplyTo>,
+    pub gift: Option<Gift>,
+    /// Set for messages Vodka can't show as text (a gift, an invite card): what the website calls it.
+    pub kind: String,
+}
+
+pub fn message(m: &Value) -> Option<Message> {
+    let reply = m.get("reply_to").filter(|r| r.is_object()).and_then(|r| {
+        Some(ReplyTo {
+            id: r.get("id").or_else(|| r.get("message_id")).and_then(Value::as_u64)?,
+            sender_id: r.get("sender_id").and_then(Value::as_u64),
+            sender_name: text(r, "sender_username"),
+            body: text(r, "body"),
+        })
+    });
+    let reply = reply.or_else(|| {
+        m.get("reply_to_message_id").and_then(Value::as_u64).filter(|id| *id > 0).map(|id| ReplyTo { id, sender_id: None, sender_name: String::new(), body: String::new() })
+    });
+    let gift = m.get("gift").filter(|g| g.is_object()).and_then(|g| {
+        let key = g.get("thumbnail_key").and_then(Value::as_str).map(|k| k.trim_start_matches('/')).filter(|k| {
+            !k.is_empty() && !k.contains("..") && k.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
+        });
+        Some(Gift {
+            id: g.get("gift_id").or_else(|| g.get("id")).and_then(Value::as_u64)?,
+            item_id: g.get("item_id").and_then(Value::as_u64).unwrap_or(0),
+            item_name: text(g, "item_name"),
+            variant_name: text(g, "variant_name"),
+            picture_url: key
+                .and_then(|k| asset_url(Some(&Value::String(format!("https://assets.luduvo.com/{k}")))))
+                .or_else(|| asset_url(g.get("thumbnail_url"))),
+            status: Some(text(g, "status")).filter(|s| !s.is_empty()).unwrap_or_else(|| "pending".into()),
+        })
+    });
+    Some(Message {
+        id: m.get("id")?.as_u64()?,
+        sender_id: m.get("sender_id").and_then(Value::as_u64).unwrap_or(0),
+        sender_name: text(m, "sender_username"),
+        body: text(m, "body"),
+        sent_at: m.get("sent_at").or_else(|| m.get("created_at")).and_then(unix_secs).unwrap_or(0),
+        reply_to: reply,
+        gift,
+        kind: if m.get("gift_id").is_some_and(|g| !g.is_null()) { "gift".into() } else { text(m, "kind") },
+    })
+}
+
+/// A page of messages, oldest first, plus how far you've read.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePage {
+    pub messages: Vec<Message>,
+    pub last_read_id: u64,
+    /// More older messages exist.
+    pub more: bool,
+}
+
+pub fn message_page(v: &Value, asked: usize) -> MessagePage {
+    let list = v.get("messages").or_else(|| v.get("items")).and_then(Value::as_array).or_else(|| v.as_array());
+    let mut messages: Vec<Message> = list.into_iter().flatten().filter_map(message).collect();
+    messages.sort_by_key(|m| m.id);
+    messages.dedup_by_key(|m| m.id);
+    MessagePage {
+        more: v.get("has_more").and_then(Value::as_bool).unwrap_or(messages.len() >= asked),
+        messages,
+        last_read_id: v.get("last_read_message_id").and_then(Value::as_u64).unwrap_or(0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -761,6 +933,7 @@ mod tests {
         let list = place_list(&recent);
         assert_eq!(list.len(), 1);
         assert_eq!((list[0].id, list[0].title.as_str(), list[0].playing, list[0].playtime), (1988, "Murder Mayhem", 3, Some(420)));
+        assert_eq!(list[0].last_played, Some(1794838800));
     }
 
     #[test]
@@ -942,11 +1115,40 @@ mod tests {
     #[test]
     fn reads_colour_variants() {
         let l = variants(&json!({ "variants": [
-            { "variant_index": 1, "name": "White", "hex_code": "#EDEDED", "thumbnail_key": "item_previews/1738/v1/ab.png" },
+            { "variant_index": 1, "name": "White", "hex_code": "#EDEDED", "price": 5, "thumbnail_key": "item_previews/1738/v1/ab.png" },
             { "variant_index": 2, "name": "Odd", "hex_code": "red; x", "thumbnail_key": "../x.png" }
         ] }));
-        assert_eq!(l[0], Variant { index: 1, name: "White".into(), color: Some("#EDEDED".into()), picture_url: Some("https://assets.luduvo.com/item_previews/1738/v1/ab.png".into()) });
+        assert_eq!(l[0], Variant { index: 1, on_sale: true, price: Some(5), name: "White".into(), color: Some("#EDEDED".into()), picture_url: Some("https://assets.luduvo.com/item_previews/1738/v1/ab.png".into()) });
         assert_eq!((l[1].color.as_deref(), l[1].picture_url.as_deref()), (None, None));
+    }
+
+    #[test]
+    fn reads_chats_and_messages() {
+        let c = conversations(&json!({ "conversations": [
+            { "id": 4, "kind": "direct", "title": null, "peer_user_id": 77, "peer_username": "Pixel_Pixe", "peer_display_name": "Pixel_Pixe",
+              "unread_count": 2, "last_message_id": 90, "last_read_message_id": 88, "last_message_body": "im finishing my flight sim rn",
+              "last_message_sender_id": 77, "last_message_sent_at": 1794870000 },
+            { "id": 5, "kind": "group", "title": "  ", "peer_username": null, "unread_count": 0 },
+            { "id": 6, "kind": "group", "title": "Fish crew", "last_message_sent_at": 1794870000123u64 }
+        ] }));
+        assert_eq!((c[0].name.as_str(), c[0].peer_id, c[0].unread, c[0].last_sent_at), ("Pixel_Pixe", Some(77), 2, Some(1794870000)));
+        assert_eq!((c[1].name.as_str(), c[2].name.as_str(), c[2].last_sent_at), ("Group chat", "Fish crew", Some(1794870000)));
+
+        // Newest first from Luduvo; oldest first for the page.
+        let p = message_page(&json!({ "messages": [
+            { "id": 91, "sender_id": 5, "sender_username": "PuppyGirl", "body": "same", "sent_at": 1794870100,
+              "reply_to": { "id": 90, "sender_id": 77, "sender_username": "Pixel_Pixe", "body": "hiiii" } },
+            { "id": 90, "sender_id": 77, "sender_username": "Pixel_Pixe", "body": "hiiii", "sent_at": 1794870000 },
+            { "id": 89, "sender_id": 77, "sender_username": "Pixel_Pixe", "body": "", "sent_at": 1794860000, "gift_id": 3,
+              "gift": { "gift_id": 3, "item_id": 1738, "item_name": "Long Emo Hair", "variant_name": "Pink", "status": "pending",
+                        "thumbnail_key": "item_previews/1738/v8/ab.png" } }
+        ], "last_read_message_id": 90 }), 50);
+        assert_eq!(p.messages.iter().map(|m| m.id).collect::<Vec<_>>(), vec![89, 90, 91]);
+        assert_eq!((p.last_read_id, p.more, p.messages[0].kind.as_str()), (90, false, "gift"));
+        let g = p.messages[0].gift.as_ref().unwrap();
+        assert_eq!((g.id, g.item_name.as_str(), g.status.as_str()), (3, "Long Emo Hair", "pending"));
+        assert_eq!(g.picture_url.as_deref(), Some("https://assets.luduvo.com/item_previews/1738/v8/ab.png"));
+        assert_eq!(p.messages[2].reply_to.as_ref().map(|r| (r.id, r.sender_name.as_str())), Some((90, "Pixel_Pixe")));
     }
 
     #[test]
