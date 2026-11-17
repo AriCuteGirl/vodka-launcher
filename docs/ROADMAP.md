@@ -10,7 +10,7 @@ next, one phase at a time. Each item is finished, tested and committed before th
 - [x] **6.2 Friend notifications.** A small pop-up when a friend comes online or starts a game, with Join. Roblox and
       Luduvo. Can be turned off.
 - [ ] **6.3 Luduvo Play on Windows.** Needs where Luduvo installs on Windows (ask a tester).
-- [ ] **6.4 Release 0.3.0** (Linux AppImage) and **Windows preview 4**.
+- [x] **6.4 Release 0.3.0** (Linux AppImage) and **Windows preview 4**.
 
 ## Phase 7: While you play
 

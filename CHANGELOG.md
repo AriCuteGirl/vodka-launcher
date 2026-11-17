@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-17)
+
+Friend pop-ups, Roblox profiles, and Luduvo's Marketplace, Friends, Avatar and profiles inside Vodka.
 
 - Luduvo Avatar: the preview picture now catches up after you change something (Luduvo draws it a few seconds later); it says "Updating picture…" meanwhile.
 - Luduvo Avatar: items you own in a colour (Blue, Pink…) show that colour's picture and a colour chip, instead of all looking the same.

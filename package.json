@@ -1,6 +1,6 @@
 {
   "name": "vodka-launcher",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A Roblox launcher for Linux, built on Mocktail",
   "type": "module",
   "private": true,
