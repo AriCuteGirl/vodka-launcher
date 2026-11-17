@@ -38,7 +38,8 @@ chmod +x vodka-launcher-*-x86_64.AppImage
 It needs nothing else installed besides Mocktail and a keyring. If it won't start with a FUSE error, install `fuse2`
 (or run it with `--appimage-extract-and-run`). To build it yourself: `./scripts/build-appimage.sh`.
 
-A Windows version is in progress and untested; see [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md).
+**Windows:** download `vodka-launcher-…-windows-x64.zip` from the same Releases page, unzip it and run
+`Vodka Launcher.exe`. See [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## Requirements
 

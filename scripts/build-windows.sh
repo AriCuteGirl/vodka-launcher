@@ -26,7 +26,7 @@ cp "$out/vodka-launcher.exe" "$dist/Vodka Launcher.exe"
 # Tauri's Windows builds made with mingw load the WebView2 loader from a DLL next to the program.
 cp "$out/WebView2Loader.dll" "$dist/"
 cp LICENSE NOTICE "$dist/"
-# Plain-text copy of the tester notes, readable with Notepad.
-cp docs/WINDOWS_TESTING.md "$dist/READ ME FIRST.txt"
+# Plain-text copy of the Windows notes, readable with Notepad.
+cp docs/WINDOWS.md "$dist/READ ME FIRST.txt"
 (cd dist && rm -f vodka-launcher-windows.zip && zip -qr vodka-launcher-windows.zip vodka-launcher-windows)
 echo "Built dist/vodka-launcher-windows.zip"

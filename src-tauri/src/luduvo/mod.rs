@@ -45,11 +45,16 @@ pub struct Status {
     pub installed: bool,
     /// Luduvo's own build number, from the launcher's state file.
     pub version: Option<String>,
-    /// False where Vodka can't start Luduvo yet (Windows).
+    /// False where Vodka can't start Luduvo (none at the moment; kept for older pages).
     pub supported: bool,
     pub install_command: &'static str,
 }
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Where Luduvo's launcher, its `state.json` and `launcher.log` live.
+#[cfg(not(windows))]
 fn install_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(dir).join("Luduvo"));
@@ -57,22 +62,67 @@ fn install_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share/Luduvo"))
 }
 
+/// On Windows the installer puts Luduvo in `%LOCALAPPDATA%\Luduvo`; the `luduvo://` link handler names the
+/// program, so a different folder is found too.
+#[cfg(windows)]
+fn install_dir() -> Option<PathBuf> {
+    use std::os::windows::process::CommandExt;
+    let from_handler = std::process::Command::new("reg")
+        .args(["query", r"HKCU\Software\Classes\luduvo\shell\open\command", "/ve"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()
+        .and_then(|o| crate::winclient::handler_program(&String::from_utf8_lossy(&o.stdout), |k| std::env::var(k).ok()))
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+        .and_then(|p| p.parent().map(PathBuf::from));
+    from_handler.or_else(|| std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Luduvo")))
+}
+
+#[cfg(windows)]
+const LAUNCHER: &str = "Luduvo.exe";
+#[cfg(not(windows))]
+const LAUNCHER: &str = "Luduvo";
+
 /// The launcher binary, if the official install is there.
 pub fn launcher() -> Option<PathBuf> {
-    if cfg!(windows) {
-        return None;
-    }
-    let exe = install_dir()?.join("Luduvo");
+    let exe = install_dir()?.join(LAUNCHER);
     exe.is_file().then_some(exe)
+}
+
+fn state() -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(install_dir()?.join("state.json")).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 pub fn detect() -> Status {
     let exe = launcher();
-    let version = install_dir()
-        .and_then(|d| std::fs::read_to_string(d.join("state.json")).ok())
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("version").and_then(|v| v.as_str()).map(str::to_owned));
-    Status { installed: exe.is_some(), version, supported: !cfg!(windows), install_command: INSTALL_COMMAND }
+    let version = state().and_then(|v| v.get("version").and_then(|v| v.as_str()).map(str::to_owned));
+    // Windows uses Luduvo's installer from its download page instead of a command.
+    let install_command = if cfg!(windows) { "" } else { INSTALL_COMMAND };
+    Status { installed: exe.is_some(), version, supported: true, install_command }
+}
+
+/// The game's program name on Windows, as Luduvo's `state.json` gives it.
+#[cfg(windows)]
+fn game_exe() -> String {
+    state()
+        .and_then(|v| v.get("game_exe").and_then(|g| g.as_str()).map(str::to_owned))
+        .filter(|g| g.to_ascii_lowercase().ends_with(".exe") && !g.contains(['\\', '/']))
+        .unwrap_or_else(|| "LuduvoGame.exe".into())
+}
+
+/// Running Luduvo games on Windows (the launcher starts one and exits).
+#[cfg(windows)]
+pub fn game_pids() -> Vec<u32> {
+    use std::os::windows::process::CommandExt;
+    let exe = game_exe();
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("IMAGENAME eq {exe}"), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| crate::winclient::parse_tasklist_named(&String::from_utf8_lossy(&o.stdout), &exe).into_iter().map(|p| p.pid).collect())
+        .unwrap_or_default()
 }
 
 /// The Luduvo game Vodka started and is watching.
@@ -93,9 +143,16 @@ pub struct Running {
     pub playing_since: Option<u64>,
 }
 
-/// Whether the launcher Vodka started has turned into the game itself (it replaces itself with `LuduvoGame`).
+/// Whether the launcher Vodka started has turned into the game itself (on Linux it replaces itself with
+/// `LuduvoGame`; on Windows `pid` is the game's own once Vodka found it).
+#[cfg(not(windows))]
 pub fn is_game_process(pid: u32) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.trim() == "LuduvoGame")
+}
+
+#[cfg(windows)]
+pub fn is_game_process(pid: u32) -> bool {
+    game_pids().contains(&pid)
 }
 
 /// What Luduvo's launcher log says about a start that began at `since_ms` (Unix milliseconds).
@@ -131,11 +188,43 @@ pub fn open_studio() -> Result<()> {
 
 /// Asks a game Vodka started to close, the way closing its window would.
 pub fn stop(pid: u32) -> Result<()> {
+    #[cfg(not(windows))]
     let ok = std::process::Command::new("kill")
         .args(["-TERM", &pid.to_string()])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
+    #[cfg(windows)]
+    let ok = {
+        use std::os::windows::process::CommandExt;
+        let close = |force: bool| {
+            let mut args = vec!["/PID".to_owned(), pid.to_string(), "/T".to_owned()];
+            if force {
+                args.push("/F".into());
+            }
+            std::process::Command::new("taskkill").args(&args).creation_flags(CREATE_NO_WINDOW).status().map(|s| s.success()).unwrap_or(false)
+        };
+        let alive = || {
+            std::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
+                .unwrap_or(false)
+        };
+        // Politely first (like the window's close button). A game may ignore that, so after a few seconds it's
+        // closed for sure.
+        close(false);
+        let mut gone = false;
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if !alive() {
+                gone = true;
+                break;
+            }
+        }
+        gone || close(true) || !alive()
+    };
     if ok { Ok(()) } else { Err(AppError::Other("Vodka couldn't close the Luduvo game. Close its window instead.".into())) }
 }
 

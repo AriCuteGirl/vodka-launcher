@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { api } from "$lib/api";
   import Button from "$lib/components/Button.svelte";
   import CopyCommand from "$lib/components/CopyCommand.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -31,8 +32,13 @@
   {:else if missing && luduvo.status}
     <section class="setup glass" aria-labelledby="ludinstall">
       <h2 id="ludinstall"><Icon name="alert" size={18} /> Luduvo isn't installed</h2>
-      <p class="muted">Install it with Luduvo's own script from luduvo.com/download, then come back. Vodka never runs it for you.</p>
-      <CopyCommand label="Linux, x86_64" command={luduvo.status.installCommand} />
+      {#if luduvo.status.installCommand}
+        <p class="muted">Install it with Luduvo's own script from luduvo.com/download, then come back. Vodka never runs it for you.</p>
+        <CopyCommand label="Linux, x86_64" command={luduvo.status.installCommand} />
+      {:else}
+        <p class="muted">Download Luduvo's installer from luduvo.com/download, run it, then come back here.</p>
+        <div><Button variant="primary" icon="forward" onclick={() => api.openExternal("https://luduvo.com/download")}>Open luduvo.com/download</Button></div>
+      {/if}
       <p class="faint hint">
         The first time Luduvo starts it downloads its game content (about 80 MB) before any window appears. That can take a few
         minutes, and clicking it again in the meantime does nothing.

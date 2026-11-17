@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 (2026-11-17)
+
+Windows is a normal release now, and Luduvo plays on Windows.
+
+- Luduvo on Windows: Play starts games through Luduvo's own launcher (found through its `luduvo://` link handler,
+  usually in `%LOCALAPPDATA%\Luduvo`), shows update and content-download progress, follows the game while it runs
+  (Playing now, playtime) and Close game closes it. Open Studio works too. If Luduvo isn't installed, the Luduvo page
+  links to luduvo.com/download.
+- Close game waits a few seconds for the game to close itself, then makes sure it's closed.
+- Windows notes in the zip (`READ ME FIRST.txt`) are now a normal how-to instead of a tester checklist.
+
+Tested in a Windows 10 VM: Luduvo detection, Open Studio, Play (start, progress, following the game) and Close game.
+The VM has no graphics card, so a game there can't actually be played.
+
 ## 0.4.1 (2026-11-17)
 
 Gifts in Luduvo Messages, and notifications that show above pop-ups.

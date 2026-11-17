@@ -17,10 +17,15 @@ pub struct Process {
 /// Reads `tasklist /FI "IMAGENAME eq RobloxPlayerBeta.exe" /FO CSV /NH`. The memory column is localised
 /// ("512,345 K", "512 345 K", "512.345 K"), so only its digits count.
 pub fn parse_tasklist(text: &str) -> Vec<Process> {
+    parse_tasklist_named(text, "RobloxPlayerBeta.exe")
+}
+
+/// The same, for any program (`LuduvoGame.exe`, ...).
+pub fn parse_tasklist_named(text: &str, image: &str) -> Vec<Process> {
     text.lines()
         .filter_map(|line| {
             let cols: Vec<&str> = line.split("\",\"").map(|c| c.trim_matches(|ch| ch == '"' || ch == '\r')).collect();
-            if cols.len() < 5 || !cols[0].eq_ignore_ascii_case("RobloxPlayerBeta.exe") {
+            if cols.len() < 5 || !cols[0].eq_ignore_ascii_case(image) {
                 return None;
             }
             let pid = cols[1].parse().ok()?;
@@ -74,6 +79,39 @@ pub fn match_processes(games: &[Tracked], running: &[Process]) -> Vec<Outcome> {
             }
         })
         .collect()
+}
+
+/// The program in a `reg query ... /ve` answer for a link handler, like
+/// `(Default)    REG_SZ    "C:\Users\Ari\AppData\Roaming\Luduvo\Luduvo.exe" "%1"`. `%NAME%` parts are filled from `env`.
+pub fn handler_program(reg_output: &str, env: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let line = reg_output.lines().find(|l| l.contains("REG_SZ") || l.contains("REG_EXPAND_SZ"))?;
+    let value = line.split_once("REG_EXPAND_SZ").or_else(|| line.split_once("REG_SZ"))?.1.trim();
+    let program = if let Some(rest) = value.strip_prefix('"') { rest.split('"').next()? } else { value.split_whitespace().next()? };
+    // Fill in %APPDATA% and the like.
+    let mut out = String::new();
+    let mut parts = program.split('%');
+    out.push_str(parts.next().unwrap_or_default());
+    let rest: Vec<&str> = parts.collect();
+    let mut i = 0;
+    while i < rest.len() {
+        if i + 1 < rest.len() {
+            match env(rest[i]) {
+                Some(v) => out.push_str(&v),
+                None => {
+                    out.push('%');
+                    out.push_str(rest[i]);
+                    out.push('%');
+                }
+            }
+            out.push_str(rest[i + 1]);
+            i += 2;
+        } else {
+            out.push('%');
+            out.push_str(rest[i]);
+            i += 1;
+        }
+    }
+    (!out.is_empty() && out.to_ascii_lowercase().ends_with(".exe")).then_some(out)
 }
 
 /// The FastFlags that carry Vodka's simpler options on Windows.
@@ -174,6 +212,23 @@ mod tests {
     fn a_game_follows_roblox_restarting_itself() {
         let a = Tracked { pid: Some(30), before: vec![] };
         assert_eq!(match_processes(&[a], &[proc(31)]), vec![Outcome::Running(Some(31))]);
+    }
+
+    #[test]
+    fn finds_the_program_behind_a_link_handler() {
+        let out = "\r\nHKEY_CURRENT_USER\\Software\\Classes\\luduvo\\shell\\open\\command\r\n    (Default)    REG_SZ    \"C:\\Users\\Ari\\AppData\\Roaming\\Luduvo\\Luduvo.exe\" \"%1\"\r\n";
+        assert_eq!(handler_program(out, |_| None).as_deref(), Some("C:\\Users\\Ari\\AppData\\Roaming\\Luduvo\\Luduvo.exe"));
+        let expand = "    (Default)    REG_EXPAND_SZ    %APPDATA%\\Luduvo\\Luduvo.exe %1";
+        let env = |k: &str| (k == "APPDATA").then(|| "C:\\Users\\Ari\\AppData\\Roaming".to_string());
+        assert_eq!(handler_program(expand, env).as_deref(), Some("C:\\Users\\Ari\\AppData\\Roaming\\Luduvo\\Luduvo.exe"));
+        assert_eq!(handler_program("ERROR: The system was unable to find the specified registry key or value.", |_| None), None);
+    }
+
+    #[test]
+    fn reads_tasklist_for_other_programs() {
+        let out = "\"LuduvoGame.exe\",\"5120\",\"Console\",\"1\",\"640,000 K\"\r\n\"RobloxPlayerBeta.exe\",\"7788\",\"Console\",\"1\",\"1 K\"";
+        assert_eq!(parse_tasklist_named(out, "LuduvoGame.exe"), vec![Process { pid: 5120, memory_bytes: 640_000 * 1024 }]);
+        assert_eq!(parse_tasklist(out).len(), 1);
     }
 
     #[test]
