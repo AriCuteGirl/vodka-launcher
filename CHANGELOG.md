@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Linux: when Mocktail keeps an older Roblox client because it can't use the newest one yet, Vodka says so: a
+  reminder when the first game starts and a note in the Mocktail box. With an outdated client, Roblox may not show you
+  as playing or update Continue playing until Mocktail updates.
+
 ## 0.5.0 (2026-11-17)
 
 Windows is a normal release now, and Luduvo plays on Windows.

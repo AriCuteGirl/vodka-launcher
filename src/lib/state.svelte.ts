@@ -1,7 +1,7 @@
 // App-wide reactive state. Components read `app.*` and call the functions below.
 import { api } from "./api";
 import { noteFriends } from "./alerts.svelte";
-import { NO_OPTIONS, toAppError, type LaunchOptions, type Person, type Target, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type Settings, type User } from "./types";
+import { NO_OPTIONS, toAppError, type LaunchOptions, type Person, type Target, type Account, type AppError, type ExitEvent, type Game, type Instance, type Loadable, type MocktailStatus, type OutdatedClient, type Settings, type User } from "./types";
 
 export interface Toast {
   id: number;
@@ -25,6 +25,8 @@ export const app = $state({
   accounts: [] as Account[],
   instances: [] as Instance[],
   mocktail: null as MocktailStatus | null,
+  /** Set when Mocktail said it is running an older Roblox client than the newest one. */
+  outdatedClient: null as OutdatedClient | null,
   online: typeof navigator === "undefined" ? true : navigator.onLine,
   search: "",
   toasts: [] as Toast[],
@@ -436,6 +438,18 @@ export async function boot() {
   });
   await api.onInstanceExit(onExit);
   await api.onInstanceError((error) => toast(error.message, "danger"));
+  await api.onOutdatedClient((client) => {
+    const first = app.outdatedClient?.running !== client.running || app.outdatedClient?.newest !== client.newest;
+    app.outdatedClient = client;
+    // Once per app run (and again if the versions change), not for every game.
+    if (first) {
+      toast(
+        `Mocktail is running an outdated Roblox client (${client.running}; the newest is ${client.newest}). Games still start, but Roblox may not show you as playing or update Continue playing until Mocktail adds support for ${client.newest}.`,
+        "danger",
+        12000,
+      );
+    }
+  });
   await api.onSignedIn((user) => {
     app.signingIn = false;
     app.account = user;

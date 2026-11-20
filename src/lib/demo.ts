@@ -226,6 +226,8 @@ function launch(game: Game, account: Account): number {
   };
   instances.push(inst);
   emit("instances://changed", null);
+  // Mocktail's start-up note when it couldn't verify the newest Roblox client (the real one as of 2026-11-19).
+  setTimeout(() => emit("mocktail://outdated-client", { running: "2.742.1059", newest: "2.748.1527" }), 200);
   const lines = ["  [runtime] loaded 0 FFlag overrides", "  [auth] typed Roblox credential ready for native startup", "  [window] Window ready; waiting for Roblox frames"];
   lines.forEach((l, i) => setTimeout(() => inst.log.push(l), 300 * (i + 1)));
   setTimeout(() => {

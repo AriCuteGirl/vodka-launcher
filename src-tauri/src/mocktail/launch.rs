@@ -18,6 +18,28 @@ pub fn is_signin_failure(line: &str) -> bool {
     line.contains("authentication preflight failed")
 }
 
+/// Mocktail keeps running an older Roblox client when it can't verify the newest one. Roblox may then
+/// not record the play (presence, recently played), so Vodka tells the user.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutdatedClient {
+    pub running: String,
+    pub newest: String,
+}
+
+/// Reads `[native-updater] kept Roblox 2.742.1059 (3222); Roblox 2.748.1527 (22294) was rejected: ...`.
+pub fn parse_outdated_client(line: &str) -> Option<OutdatedClient> {
+    let rest = line.split("[native-updater] kept Roblox ").nth(1)?;
+    let (running, rest) = rest.split_once(' ')?;
+    let newest = rest.split("; Roblox ").nth(1)?;
+    let (newest, rest) = newest.split_once(' ')?;
+    if !rest.contains("was rejected") {
+        return None;
+    }
+    let version = |v: &str| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+    (version(running) && version(newest)).then(|| OutdatedClient { running: running.to_owned(), newest: newest.to_owned() })
+}
+
 /// Mocktail prints this once the game is drawing frames.
 pub fn is_running_marker(line: &str) -> bool {
     line.contains("[perf] present_sample")
@@ -95,6 +117,17 @@ pub fn classify_exit(code: Option<i32>, log: &[String]) -> ExitReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_outdated_client_line() {
+        let line = "[native-updater] kept Roblox 2.742.1059 (3222); Roblox 2.748.1527 (22294) was rejected: signature small-allocate matched 0 candidate locations; Roblox 2.748.1527 is published";
+        assert_eq!(
+            parse_outdated_client(line),
+            Some(OutdatedClient { running: "2.742.1059".into(), newest: "2.748.1527".into() })
+        );
+        assert_eq!(parse_outdated_client("[native-updater] using Roblox 2.748.1527 (22294)"), None);
+        assert_eq!(parse_outdated_client("[native-updater] kept Roblox 2.742.1059 (3222); nothing newer"), None);
+    }
 
     #[test]
     fn builds_the_uri_mocktail_parses() {
