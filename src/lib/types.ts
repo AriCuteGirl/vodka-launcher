@@ -173,6 +173,12 @@ export interface InstallStep {
   command: string;
 }
 
+/** Mocktail kept an older Roblox client because it couldn't verify the newest one. */
+export interface OutdatedClient {
+  running: string;
+  newest: string;
+}
+
 export interface MocktailStatus {
   /** What runs the game: Mocktail on Linux, the official Roblox client on Windows. */
   engine: "mocktail" | "roblox";

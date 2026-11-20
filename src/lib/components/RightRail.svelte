@@ -92,6 +92,12 @@
         <dt>Roblox client</dt>
         <dd title={m.robloxVersion ?? undefined}>{m.robloxVersion ?? "downloads on first launch"}</dd>
       </dl>
+      {#if app.outdatedClient && !onWindows()}
+        <p class="outdated small">
+          <b>Outdated Roblox client.</b> Mocktail can't use Roblox {app.outdatedClient.newest} yet, so it runs {app.outdatedClient.running}. Roblox may not
+          show you as playing or update Continue playing until Mocktail updates.
+        </p>
+      {/if}
     {:else}
       <p class="status bad"><i></i>Not installed</p>
       <p class="faint small">Vodka needs {onWindows() ? "the Roblox client" : "Mocktail"} to run games. Setup steps are on Home.</p>
@@ -165,6 +171,10 @@
   .small {
     font-size: var(--fs-sm);
     margin-top: var(--s-2);
+  }
+  .outdated {
+    color: var(--warn, var(--text-1));
+    line-height: 1.4;
   }
   .icon {
     display: grid;

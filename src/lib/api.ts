@@ -1,5 +1,5 @@
 // The only place the UI talks to the Rust backend.
-import type { LuduvoVariant, LuduvoConversation, LuduvoMessage, LuduvoMessagePage, Played, LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, Settings, User } from "./types";
+import type { LuduvoVariant, LuduvoConversation, LuduvoMessage, LuduvoMessagePage, Played, LuduvoGroup, LuduvoProfile, LuduvoAvatar, LuduvoOutfit, LuduvoOwned, LuduvoItem, LuduvoCategory, Profile, UserGroup, GroupInfo, ServerOffer, OwnedServer, GameDetails, LuduvoDetails, LuduvoRating, LuduvoServer, LuduvoFriend, LuduvoRunning, LuduvoPlace, LuduvoShelf, LuduvoStatus, LuduvoUser, Account, AppError, AvatarView, Chart, GameStanding, Item, ItemPage, Offer, PartySync, ChatContact, ChatMe, ChatMessage, ChatSync, FriendLocation, Person, ServerLists, Target, ExitEvent, Game, Instance, LaunchOptions, MocktailStatus, OutdatedClient, Settings, User } from "./types";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -175,6 +175,7 @@ export const api = {
   onInstancesChanged: (h: () => void) => on<null>("instances://changed", h),
   onInstanceExit: (h: (event: ExitEvent) => void) => on<ExitEvent>("instances://exit", h),
   onInstanceError: (h: (error: AppError) => void) => on<AppError>("instances://error", h),
+  onOutdatedClient: (h: (client: OutdatedClient) => void) => on<OutdatedClient>("mocktail://outdated-client", h),
   onSignedIn: (h: (user: User) => void) => on<User>("auth://signed-in", h),
   onLoginClosed: (h: () => void) => on<null>("auth://closed", h),
   onAuthError: (h: (error: AppError) => void) => on<AppError>("auth://error", h),

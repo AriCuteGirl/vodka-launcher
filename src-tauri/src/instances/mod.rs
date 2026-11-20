@@ -11,7 +11,7 @@ pub mod slots;
 use crate::accounts;
 use crate::error::{AppError, Result};
 use crate::mocktail::detect::APP_ID;
-use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, is_signin_failure, launch_uri, parse_present_sample, redact};
+use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, is_signin_failure, launch_uri, parse_outdated_client, parse_present_sample, redact};
 use crate::roblox_api::Game;
 use crate::settings::SavedAccount;
 use profiles::ProfilePaths;
@@ -187,6 +187,9 @@ fn pump<R: AsyncRead + Unpin + Send + 'static>(reader: R, app: AppHandle, manage
             }
             if became_playing {
                 let _ = app.emit("instances://changed", ());
+            }
+            if let Some(outdated) = parse_outdated_client(&line) {
+                let _ = app.emit("mocktail://outdated-client", outdated);
             }
         }
     });
