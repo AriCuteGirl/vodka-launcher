@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 (2026-11-21)
+
+Runs on older Linux systems and on NixOS.
 
 - Linux: when Mocktail keeps an older Roblox client because it can't use the newest one yet, Vodka says so: a
   reminder when the first game starts and a note in the Mocktail box. With an outdated client, Roblox may not show you
   as playing or update Continue playing until Mocktail updates.
-- NixOS: a Nix flake (`nix run github:AriCuteGirl/vodka-launcher`) builds Vodka from source, for systems where the
-  AppImage won't run (NixOS, or glibc older than 2.43).
+- The AppImage is now built on Ubuntu 24.04, so it needs glibc 2.39 instead of 2.43 and runs on older distros.
+- NixOS: a Nix flake. `nix run github:AriCuteGirl/vodka-launcher` runs the release AppImage with nothing to compile,
+  so it works on any x86_64 CPU. `vodka-launcher-source` builds from source instead; that build now also works on
+  CPUs without AVX2 (it used to stop with exit code 132), using Rolldown's WebAssembly build.
 
 ## 0.5.0 (2026-11-17)
 

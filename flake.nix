@@ -10,10 +10,20 @@
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
-      packages = forAll (pkgs: rec {
-        vodka-launcher = pkgs.callPackage ./nix/package.nix { };
-        default = vodka-launcher;
-      });
+      # vodka-launcher: the prebuilt release AppImage, nothing to compile (x86_64 only).
+      # vodka-launcher-source: built from this checkout; needs a CPU with AVX2 and takes a while.
+      packages = forAll (
+        pkgs:
+        let
+          source = pkgs.callPackage ./nix/package.nix { };
+          vodka = if pkgs.stdenv.hostPlatform.isx86_64 then pkgs.callPackage ./nix/appimage.nix { } else source;
+        in
+        {
+          vodka-launcher = vodka;
+          vodka-launcher-source = source;
+          default = vodka;
+        }
+      );
 
       apps = forAll (pkgs: rec {
         vodka-launcher = {
@@ -24,12 +34,12 @@
       });
 
       overlays.default = final: _prev: {
-        vodka-launcher = final.callPackage ./nix/package.nix { };
+        vodka-launcher = self.packages.${final.stdenv.hostPlatform.system}.vodka-launcher;
       };
 
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
-          inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.vodka-launcher ];
+          inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.vodka-launcher-source ];
           packages = [ pkgs.cargo-tauri pkgs.rust-analyzer ];
         };
       });
