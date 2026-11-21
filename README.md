@@ -37,6 +37,26 @@ chmod +x vodka-launcher-*-x86_64.AppImage
 
 It needs nothing else installed besides Mocktail and a keyring. If it won't start with a FUSE error, install `fuse2`
 (or run it with `--appimage-extract-and-run`). To build it yourself: `./scripts/build-appimage.sh`.
+The AppImage needs glibc 2.43 or newer; on older systems it fails with "GLIBC_2.43 not found".
+
+**NixOS / Nix:** the AppImage won't run on NixOS. Use the flake instead, which builds Vodka from source:
+
+```bash
+nix run github:AriCuteGirl/vodka-launcher
+```
+
+To install it for good, add the flake to your system flake's inputs and the package to your packages:
+
+```nix
+# flake.nix
+inputs.vodka-launcher.url = "github:AriCuteGirl/vodka-launcher";
+
+# configuration.nix (pass `inputs` through specialArgs)
+environment.systemPackages = [ inputs.vodka-launcher.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+```
+
+You also need `services.flatpak.enable = true;` (for Mocktail) and a keyring, for example
+`services.gnome.gnome-keyring.enable = true;`. `nix flake update vodka-launcher` gets the newest version.
 
 **Windows:** download `vodka-launcher-…-windows-x64.zip` from the same Releases page, unzip it and run
 `Vodka Launcher.exe`. See [docs/WINDOWS.md](docs/WINDOWS.md).
