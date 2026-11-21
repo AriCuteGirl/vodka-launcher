@@ -48,7 +48,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     inherit (finalAttrs) pname version src;
     inherit pnpm;
     fetcherVersion = 5;
-    hash = "sha256-6bw+h7yT76KO4/SyDODqGdvFUVwewzVVugi5W6H0ASo=";
+    hash = "sha256-WLUyU7H+x7u5M33Kxs+V0NtTWDUcTcNLgZgNW4Pr0UM=";
   };
 
   nativeBuildInputs = [
@@ -68,8 +68,13 @@ rustPlatform.buildRustPackage (finalAttrs: {
     webkitgtk_4_1
   ];
 
-  # rustls uses AWS-LC; take nixpkgs' build instead of compiling it again.
-  env.AWS_LC_SYS_USE_SYSTEM = true;
+  env = {
+    # rustls uses AWS-LC; take nixpkgs' build instead of compiling it again.
+    AWS_LC_SYS_USE_SYSTEM = true;
+    # Rolldown's native build needs AVX2 and dies with "illegal instruction" (exit 132) on older CPUs. Its
+    # WebAssembly build is slower but runs anywhere.
+    NAPI_RS_FORCE_WASI = "true";
+  };
 
   # The tests need a keyring and network access.
   doCheck = false;
