@@ -166,7 +166,7 @@ pub fn launch_step(since_ms: u64) -> Option<parse::LaunchStep> {
 /// so the returned child is the game for as long as it runs.
 pub fn spawn(arg: Option<&str>) -> Result<tokio::process::Child> {
     let exe = launcher().ok_or_else(|| AppError::Other("Luduvo isn't installed. Install it with the command on the Luduvo page.".into()))?;
-    let mut cmd = tokio::process::Command::new(exe);
+    let mut cmd = crate::host::async_command(exe);
     if let Some(arg) = arg {
         cmd.arg(arg);
     }
@@ -189,7 +189,7 @@ pub fn open_studio() -> Result<()> {
 /// Asks a game Vodka started to close, the way closing its window would.
 pub fn stop(pid: u32) -> Result<()> {
     #[cfg(not(windows))]
-    let ok = std::process::Command::new("kill")
+    let ok = crate::host::command("kill")
         .args(["-TERM", &pid.to_string()])
         .status()
         .map(|s| s.success())
@@ -1059,7 +1059,7 @@ pub fn open_browser(url: &str) -> Result<()> {
     };
     #[cfg(not(windows))]
     let mut cmd = {
-        let mut c = std::process::Command::new("xdg-open");
+        let mut c = crate::host::command("xdg-open");
         c.arg(url);
         c
     };

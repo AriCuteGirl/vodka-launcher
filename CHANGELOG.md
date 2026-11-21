@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2 (2026-11-21)
+
+Vodka finds Mocktail on NixOS again.
+
+- Linux: programs Vodka starts on your system (`flatpak`, `kill`, `xdg-open`, Luduvo's launcher) no longer inherit the
+  AppImage's library paths. On NixOS that made `flatpak` crash (`libz.so.1` missing), so Vodka said Mocktail wasn't
+  installed when it was.
+- When Flatpak is installed but fails, Vodka shows its exit code and error instead of asking you to install Flatpak or
+  Mocktail again.
+- Mocktail installed both for your user and system-wide is counted once.
+
 ## 0.5.1 (2026-11-21)
 
 Runs on older Linux systems and on NixOS.

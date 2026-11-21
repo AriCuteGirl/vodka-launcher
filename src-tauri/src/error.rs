@@ -7,6 +7,8 @@ use serde::ser::SerializeStruct;
 pub enum AppError {
     #[error("Flatpak is not installed, so Vodka can't find Mocktail.")]
     FlatpakMissing,
+    #[error("Flatpak is installed but failed, so Vodka can't check for Mocktail. {0}")]
+    FlatpakFailed(String),
     #[error("Mocktail is not installed.")]
     MocktailMissing,
     #[error("Mocktail could not be started: {0}")]
@@ -39,6 +41,7 @@ impl AppError {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::FlatpakMissing => "flatpak_missing",
+            Self::FlatpakFailed(_) => "flatpak_failed",
             Self::MocktailMissing => "mocktail_missing",
             Self::Launch(_) => "launch",
             Self::NotSignedIn => "not_signed_in",

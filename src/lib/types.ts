@@ -183,6 +183,8 @@ export interface MocktailStatus {
   /** What runs the game: Mocktail on Linux, the official Roblox client on Windows. */
   engine: "mocktail" | "roblox";
   flatpakAvailable: boolean;
+  /** Flatpak is there but failed to list apps: its exit code and error output. */
+  flatpakError: string | null;
   installed: boolean;
   version: string | null;
   robloxVersion: string | null;
@@ -294,6 +296,7 @@ export interface ExitReport {
 
 export type ErrorKind =
   | "flatpak_missing"
+  | "flatpak_failed"
   | "mocktail_missing"
   | "launch"
   | "not_signed_in"
