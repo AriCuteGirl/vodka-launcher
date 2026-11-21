@@ -1,6 +1,9 @@
 mod accounts;
 mod chat;
 mod error;
+// Host programs only run from an AppImage on Linux, but the helper is harmless elsewhere.
+#[cfg_attr(windows, allow(dead_code))]
+mod host;
 mod luduvo;
 mod playtime;
 #[cfg(not(windows))]
@@ -264,6 +267,9 @@ async fn prepare_launch(app: &AppHandle, account_id: Option<u64>) -> Result<(Sav
     let status = blocking(|| Ok(mocktail::detect::detect())).await?;
     if !status.flatpak_available {
         return Err(AppError::FlatpakMissing);
+    }
+    if let Some(reason) = status.flatpak_error {
+        return Err(AppError::FlatpakFailed(reason));
     }
     if !status.installed {
         return Err(AppError::MocktailMissing);
@@ -887,12 +893,14 @@ async fn rollback_client(app: AppHandle, state: State<'_, AppState>, account_id:
     if instances::profiles::client_version(&profile).is_none() {
         return Err(AppError::Other("This account hasn't played yet, so there is nothing to roll back.".into()));
     }
-    let output = tokio::process::Command::new("flatpak")
+    let output = host::async_command("flatpak")
         .args(["run", "--command=/app/lib/mocktail/mocktail_updater", mocktail::detect::APP_ID, "rollback"])
         .envs(rollback_env(&profile))
         .output()
         .await
-        .map_err(|e| AppError::Other(format!("Could not run Mocktail's updater: {e}")))?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound { AppError::FlatpakMissing } else { AppError::Other(format!("Could not run Mocktail's updater: {e}")) }
+        })?;
     if !output.status.success() {
         let reason = String::from_utf8_lossy(&output.stderr);
         let reason = reason.lines().rev().find(|l| !l.trim().is_empty() && !l.starts_with("F:")).unwrap_or("no reason given");

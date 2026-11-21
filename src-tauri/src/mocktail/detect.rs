@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::process::Command;
 
 pub const APP_ID: &str = "space.bigrat.mocktail";
@@ -19,6 +20,8 @@ pub struct MocktailStatus {
     /// What runs the game here: "mocktail" on Linux, "roblox" (the official client) on Windows.
     pub engine: &'static str,
     pub flatpak_available: bool,
+    /// Flatpak is there but `flatpak list` failed, with its exit code and stderr. Mocktail may well be installed.
+    pub flatpak_error: Option<String>,
     pub installed: bool,
     pub version: Option<String>,
     pub roblox_version: Option<String>,
@@ -28,14 +31,54 @@ pub struct MocktailStatus {
 }
 
 /// Parses `flatpak list --app --columns=application,version`.
+/// Mocktail installed both for the user and system-wide is listed twice; the first row with a version wins.
 pub fn parse_flatpak_list(output: &str) -> Option<Option<String>> {
-    output.lines().find_map(|line| {
+    let mut rows = output.lines().filter_map(|line| {
         let mut cols = line.split('\t').map(str::trim);
         if cols.next()? != APP_ID {
             return None;
         }
         Some(cols.next().filter(|v| !v.is_empty()).map(str::to_owned))
-    })
+    });
+    let first = rows.next()?;
+    Some(first.or_else(|| rows.flatten().next()))
+}
+
+/// Why a `flatpak` call gave no usable output.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FlatpakError {
+    /// There is no `flatpak` program on this system.
+    Missing,
+    /// It couldn't be started, or it ran and failed.
+    Failed(String),
+}
+
+impl FlatpakError {
+    pub fn into_app_error(self) -> crate::error::AppError {
+        match self {
+            Self::Missing => crate::error::AppError::FlatpakMissing,
+            Self::Failed(reason) => crate::error::AppError::FlatpakFailed(reason),
+        }
+    }
+}
+
+/// Runs the host's `flatpak` and returns its stdout when it succeeds.
+#[cfg(not(windows))]
+pub fn flatpak(args: &[&str]) -> Result<String, FlatpakError> {
+    let out = crate::host::command("flatpak").args(args).env("LC_ALL", "C").output().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            FlatpakError::Missing
+        } else {
+            FlatpakError::Failed(format!("`flatpak {}` could not be started: {e}", args.join(" ")))
+        }
+    })?;
+    if out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
+    }
+    let code = out.status.code().map_or_else(|| "was killed by a signal".to_owned(), |c| format!("exited with code {c}"));
+    let stderr = crate::host::stderr_tail(&out.stderr);
+    let stderr = if stderr.is_empty() { "no error output".to_owned() } else { stderr };
+    Err(FlatpakError::Failed(format!("`flatpak {}` {code}: {stderr}", args.join(" "))))
 }
 
 /// Parses `flatpak ps --columns=application`.
@@ -105,12 +148,6 @@ pub fn install_steps(family: &str, flatpak_available: bool) -> Vec<InstallStep> 
 }
 
 #[cfg(not(windows))]
-fn run(args: &[&str]) -> Option<String> {
-    let out = Command::new("flatpak").args(args).env("LC_ALL", "C").output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-#[cfg(not(windows))]
 fn flatpak_data_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     Some(PathBuf::from(home).join(".var/app").join(APP_ID).join("data/mocktail"))
@@ -120,24 +157,29 @@ fn flatpak_data_dir() -> Option<PathBuf> {
 pub fn detect() -> MocktailStatus {
     let os = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
     let (distro, family) = parse_os_release(&os);
-    let flatpak_available = run(&["--version"]).is_some();
-    let listed = run(&["list", "--app", "--columns=application,version"])
-        .and_then(|o| parse_flatpak_list(&o));
+    let list = flatpak(&["list", "--app", "--columns=application,version"]);
+    let flatpak_available = list != Err(FlatpakError::Missing);
+    let flatpak_error = match &list {
+        Err(FlatpakError::Failed(reason)) => Some(reason.clone()),
+        _ => None,
+    };
+    let listed = list.ok().and_then(|o| parse_flatpak_list(&o));
     let installed = listed.is_some();
-    let running = installed
-        && run(&["ps", "--columns=application"]).is_some_and(|o| parse_flatpak_ps(&o));
+    let running = installed && flatpak(&["ps", "--columns=application"]).is_ok_and(|o| parse_flatpak_ps(&o));
     let roblox_version = flatpak_data_dir()
         .and_then(|d| std::fs::read_to_string(d.join("current.json")).ok())
         .and_then(|t| parse_roblox_version(&t));
     MocktailStatus {
         engine: "mocktail",
         flatpak_available,
+        // A broken Flatpak isn't fixed by installing Mocktail again, so no install steps for it.
+        install_steps: if installed || flatpak_error.is_some() { vec![] } else { install_steps(family, flatpak_available) },
+        flatpak_error,
         installed,
         version: listed.flatten(),
         roblox_version,
         running,
         distro,
-        install_steps: if installed { vec![] } else { install_steps(family, flatpak_available) },
     }
 }
 
@@ -167,6 +209,7 @@ pub fn detect() -> MocktailStatus {
     MocktailStatus {
         engine: "roblox",
         flatpak_available: true,
+        flatpak_error: None,
         installed,
         version: installed.then(|| "Official client".to_owned()),
         roblox_version: newest,
@@ -188,6 +231,15 @@ mod tests {
     fn finds_mocktail_in_flatpak_list() {
         let out = "org.other.App\t1.0\nspace.bigrat.mocktail\t1.0.5\n";
         assert_eq!(parse_flatpak_list(out), Some(Some("1.0.5".into())));
+    }
+
+    #[test]
+    fn mocktail_in_user_and_system_scope_counts_once() {
+        let out = "space.bigrat.mocktail\t1.0.4\norg.other.App\t1.0\nspace.bigrat.mocktail\t1.0.4\n";
+        assert_eq!(parse_flatpak_list(out), Some(Some("1.0.4".into())));
+        // A row without a version doesn't hide the version on the other one.
+        assert_eq!(parse_flatpak_list("space.bigrat.mocktail\t\nspace.bigrat.mocktail\t1.0.5\n"), Some(Some("1.0.5".into())));
+        assert_eq!(parse_flatpak_list("space.bigrat.mocktail\t1.0.5\nspace.bigrat.mocktail\t1.0.4\n"), Some(Some("1.0.5".into())));
     }
 
     #[test]

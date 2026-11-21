@@ -198,7 +198,7 @@ async function launch(run: () => Promise<unknown>) {
     await refreshAccounts();
   } catch (e) {
     const error = toAppError(e);
-    if (error.kind === "mocktail_missing" || error.kind === "flatpak_missing") await refreshMocktail();
+    if (error.kind === "mocktail_missing" || error.kind === "flatpak_missing" || error.kind === "flatpak_failed") await refreshMocktail();
     toast(error.message, "danger");
   }
 }

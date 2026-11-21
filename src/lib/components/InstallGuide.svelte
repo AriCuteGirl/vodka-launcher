@@ -8,7 +8,7 @@
   async function recheck() {
     checking = true;
     await refreshMocktail().finally(() => (checking = false));
-    if (!app.mocktail?.installed) toast(onWindows() ? "Still can't find Roblox. Install it, start any game once from roblox.com, then check again." : "Still can't find Mocktail. Run the commands above, then check again.");
+    if (!app.mocktail?.installed) toast(onWindows() ? "Still can't find Roblox. Install it, start any game once from roblox.com, then check again." : app.mocktail?.flatpakError ? "Flatpak is still failing. See the error above." : "Still can't find Mocktail. Run the commands above, then check again.");
   }
 </script>
 
@@ -18,12 +18,16 @@
       {#if onWindows()}
         Vodka starts the official Roblox client, and it isn't installed yet. Download it from this address, then start any game once from
         roblox.com so Roblox finishes setting itself up:
+      {:else if app.mocktail.flatpakError}
+        Flatpak is installed on {app.mocktail.distro}, but it failed when Vodka asked it for the list of apps, so Vodka can't tell
+        whether Mocktail is there. Flatpak said:
       {:else if app.mocktail.flatpakAvailable}
         Mocktail runs the Roblox client on Linux. Run this in a terminal on {app.mocktail.distro}:
       {:else}
         Vodka finds Mocktail through Flatpak, and Flatpak isn't installed on {app.mocktail.distro} yet. Run these in a terminal, in order:
       {/if}
     </p>
+    {#if app.mocktail.flatpakError}<pre class="error">{app.mocktail.flatpakError}</pre>{/if}
     {#each app.mocktail.installSteps as step (step.label)}
       <CopyCommand label={step.label} command={step.command} />
     {/each}
@@ -38,6 +42,12 @@
   .guide {
     display: grid;
     gap: var(--s-4);
+  }
+  .error {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: var(--fs-sm);
   }
   .foot {
     display: flex;

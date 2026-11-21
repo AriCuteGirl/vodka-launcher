@@ -10,7 +10,7 @@ pub mod slots;
 
 use crate::accounts;
 use crate::error::{AppError, Result};
-use crate::mocktail::detect::APP_ID;
+use crate::mocktail::detect::{APP_ID, FlatpakError};
 use crate::mocktail::launch::{ExitReport, classify_exit, fps_between, is_running_marker, is_signin_failure, launch_uri, parse_outdated_client, parse_present_sample, redact};
 use crate::roblox_api::Game;
 use crate::settings::SavedAccount;
@@ -23,7 +23,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::process::Command;
 
 const LOG_LINES: usize = 400;
 
@@ -148,13 +147,13 @@ fn flatpak_data() -> Result<PathBuf> {
 
 /// The Mocktail binary inside the Flatpak's install folder, as seen from outside the sandbox.
 fn installed_binary() -> Result<PathBuf> {
-    let out = std::process::Command::new("flatpak")
-        .args(["info", "--show-location", APP_ID])
-        .env("LC_ALL", "C")
-        .output()
-        .map_err(|_| AppError::FlatpakMissing)?;
-    let location = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    if !out.status.success() || location.is_empty() {
+    let location = match crate::mocktail::detect::flatpak(&["info", "--show-location", APP_ID]) {
+        Ok(out) => out.trim().to_owned(),
+        // `flatpak info` fails this way when the app simply isn't installed.
+        Err(FlatpakError::Failed(reason)) if reason.contains("not installed") => return Err(AppError::MocktailMissing),
+        Err(e) => return Err(e.into_app_error()),
+    };
+    if location.is_empty() {
         return Err(AppError::MocktailMissing);
     }
     Ok(PathBuf::from(location).join("files/bin/mocktail"))
@@ -238,7 +237,7 @@ pub async fn launch(
     let mut m = manager.lock().unwrap();
     let slot = claim.slot;
 
-    let mut cmd = Command::new("flatpak");
+    let mut cmd = crate::host::async_command("flatpak");
     cmd.arg("run");
     if let Some(command) = slots::command(&flatpak_data()?, slot) {
         cmd.arg(format!("--command={command}"));
@@ -439,7 +438,7 @@ pub fn stop(manager: &SharedManager, id: u32, restart: bool) -> Result<()> {
     if pids.is_empty() {
         return Ok(());
     }
-    let status = std::process::Command::new("kill")
+    let status = crate::host::command("kill")
         .arg("-TERM")
         .args(&pids)
         .stderr(Stdio::null())

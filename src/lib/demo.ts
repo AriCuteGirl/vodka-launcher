@@ -107,6 +107,7 @@ function mocktail(): MocktailStatus {
   return {
     engine: scenario() === "windows" ? "roblox" : "mocktail",
     flatpakAvailable: scenario() !== "noflatpak",
+    flatpakError: null,
     installed: !missing,
     version: missing ? null : "1.0.5",
     robloxVersion: missing ? null : "2.742.1059",
