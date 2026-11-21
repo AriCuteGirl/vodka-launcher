@@ -8,10 +8,10 @@
 }:
 let
   pname = "vodka-launcher";
-  version = "0.5.1";
+  version = "0.5.2";
   src = fetchurl {
     url = "https://github.com/AriCuteGirl/vodka-launcher/releases/download/v${version}/vodka-launcher-${version}-x86_64.AppImage";
-    hash = "sha256-qcoNG8lMWOTAW5JPU30Ryzr/PphVMvRZ1Gepog7Hbcw=";
+    hash = "sha256-6HJMN/dZYN3+aLSGSaZ5jD6s7qnI9x2ECjnOzQa2AnE=";
   };
   contents = appimageTools.extract { inherit pname version src; };
 in
